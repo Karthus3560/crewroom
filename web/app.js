@@ -1,0 +1,907 @@
+'use strict';
+// Crewroom window. Column 1: projects. Column 2: the project's room, requests and agent chats. Column 3: conversation.
+
+const $ = (sel) => document.querySelector(sel);
+const ICON = (name) => `assets/icon-${name}.png`;
+const OPEN = ['held', 'asked', 'queued', 'working'];
+const state = {
+  members: {}, requests: new Map(), messages: [], last: 0,
+  projects: [], sessions: [], project: load('project', null), reqFilter: load('reqFilter', 'open'),
+  view: { type: 'room' }, to: 'team', transcriptSig: '', ready: false, cleared: {}, showOlder: new Set(),
+};
+
+marked.setOptions({ gfm: true, breaks: false });
+
+// ---------- small helpers ----------
+function load(key, fallback) { try { return JSON.parse(localStorage.getItem('tc.' + key)) ?? fallback; } catch { return fallback; } }
+function save(key, value) { try { localStorage.setItem('tc.' + key, JSON.stringify(value)); } catch { /* private mode */ } }
+function el(tag, attrs = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v === undefined || v === null || v === false) continue;
+    if (k === 'class') node.className = v;
+    else if (k.startsWith('on')) node.addEventListener(k.slice(2), v);
+    else node.setAttribute(k, v === true ? '' : v);
+  }
+  for (const c of children.flat()) if (c !== null && c !== undefined && c !== false) node.append(c instanceof Node ? c : String(c));
+  return node;
+}
+async function api(path, body) {
+  const opts = body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {};
+  const res = await fetch('/api/' + path, opts);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+function toast(text, error) {
+  const t = el('div', { class: 'toast' + (error ? ' error' : '') }, text);
+  $('#toasts').append(t);
+  setTimeout(() => t.remove(), error ? 6000 : 3200);
+}
+async function act(body, okText) {
+  try { const r = await api('open', body); toast(okText || r.message); } catch (e) { toast(e.message, true); }
+}
+const member = (id) => state.members[id] || { name: id, role: '', color: '#888' };
+const projectOf = (key) => state.projects.find((p) => p.key === key);
+const appOf = (id) => member(id).app || (String(id).startsWith('claude') ? 'claude' : String(id).startsWith('codex') ? 'codex' : 'human');
+const teamOf = (key) => (key && state.teams && state.teams[key]) || ['claude', 'codex'];
+const CHANNEL = { general: 'General', discussion: 'Discussion' };
+const tint = (hue) => (hue ? `filter:hue-rotate(${hue}deg)` : null);
+function dotFor(id) { return el('span', { class: 'dot ' + appOf(id), style: tint(member(id).hue) }); }
+function avatar(id, small, hue) {
+  const m = member(id);
+  if (m.avatar) return el('img', { class: 'avatar' + (small ? ' sm' : ''), src: m.avatar, alt: m.name, title: m.name, style: tint(hue ?? m.hue) });
+  return el('div', { class: 'avatar' + (small ? ' sm' : ''), style: `background:${m.color}`, title: m.name }, m.name[0]);
+}
+function btn(icon, label, onclick, extra = '') {
+  return el('button', { class: 'btn ' + extra, type: 'button', onclick }, icon ? el('img', { src: ICON(icon), alt: '' }) : null, label);
+}
+const time = (ts) => ts ? new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+function day(ts) {
+  const d = new Date(ts), today = new Date(), y = new Date();
+  y.setDate(today.getDate() - 1);
+  if (d.toDateString() === today.toDateString()) return 'Today';
+  if (d.toDateString() === y.toDateString()) return 'Yesterday';
+  return d.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' });
+}
+function ago(seconds) {
+  const s = Date.now() / 1000 - seconds;
+  return s < 60 ? 'now' : s < 3600 ? Math.floor(s / 60) + 'm ago' : s < 86400 ? Math.floor(s / 3600) + 'h ago' : Math.floor(s / 86400) + 'd ago';
+}
+const size = (n) => n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : n > 1024 ? Math.round(n / 1024) + ' KB' : n + ' B';
+const STATUS = { held: 'Waiting for you', asked: 'Asked', queued: 'Queued', working: 'Working', done: 'Done', failed: 'Failed', cancelled: 'Cancelled' };
+const pill = (s) => el('span', { class: 'pill ' + s }, STATUS[s] || s);
+
+function markdown(text, base) {
+  const box = el('div', { class: 'md' });
+  box.innerHTML = DOMPurify.sanitize(marked.parse(text || ''), { USE_PROFILES: { html: true } });
+  box.querySelectorAll('a').forEach((a) => {
+    const href = a.getAttribute('href') || '';
+    if (/^(https?:|mailto:)/i.test(href)) { a.target = '_blank'; a.rel = 'noopener noreferrer'; return; }
+    if (href.startsWith('#')) return;
+    // Links to local files open in File Explorer (only inside your project folders).
+    pathLink(a, decodeURIComponent(href.replace(/^file:\/\/\/?/i, '')), base);
+  });
+  // `film/index.html`, `renders/t0.25.png`, `C:\...\NOTES.md`: file paths in messages are clickable too.
+  box.querySelectorAll(':not(pre) > code').forEach((code) => {
+    const t = code.textContent.trim();
+    if (looksLikePath(t)) { code.classList.add('path-link'); pathLink(code, t, base); }
+  });
+  highlightMentions(box);
+  box.querySelectorAll('pre code').forEach((code) => {
+    try { hljs.highlightElement(code); } catch { /* unknown language */ }
+    const copy = el('button', { class: 'copy', type: 'button' }, 'Copy');
+    copy.onclick = () => { navigator.clipboard.writeText(code.innerText); copy.textContent = 'Copied'; setTimeout(() => (copy.textContent = 'Copy'), 1200); };
+    code.parentElement.append(copy);
+  });
+  return box;
+}
+
+function highlightMentions(box) {
+  const names = Object.values(state.members || {}).map((m) => m.name).filter(Boolean).sort((a, b) => b.length - a.length);
+  if (!names.length) return;
+  const re = new RegExp('(^|[^\\w@])@(' + names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')(?![\\w-])', 'gi');
+  const walker = document.createTreeWalker(box, NodeFilter.SHOW_TEXT, { acceptNode: (n) => n.parentElement.closest('code,pre,a') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT });
+  const nodes = [];
+  while (walker.nextNode()) if (walker.currentNode.nodeValue.includes('@')) nodes.push(walker.currentNode);
+  for (const n of nodes) {
+    const parts = [], s = n.nodeValue;
+    let last = 0;
+    for (const m of s.matchAll(re)) {
+      const at = m.index + m[1].length;
+      parts.push(s.slice(last, at), el('span', { class: 'mention' }, '@' + m[2]));
+      last = at + 1 + m[2].length;
+    }
+    if (!parts.length) continue;
+    parts.push(s.slice(last));
+    n.replaceWith(...parts.filter((x) => x !== ''));
+  }
+}
+function looksLikePath(t) {
+  if (!t || t.length > 260 || /[<>|"*?\n]/.test(t) || /^(https?:|--?\w|npm |npx |python |git )/i.test(t)) return false;
+  if (/^[a-z]:\\/i.test(t)) return true;
+  if (/\s/.test(t)) return false;
+  return /[\\/]/.test(t) || /^[\w.@-]+\.[a-z0-9]{1,6}$/i.test(t) && !/^\d+(\.\d+)+$/.test(t);
+}
+function pathLink(node, href, base) {
+  node.title = 'Click: show in folder · Right-click: more';
+  const go = (mode) => base ? act({ action: 'link', href, base, mode }) : toast('No folder known for this message', true);
+  node.addEventListener('click', (e) => { e.preventDefault(); go('reveal'); });
+  node.addEventListener('contextmenu', (e) => contextMenu(e, [
+    ['Show in folder', () => go('reveal')],
+    ['Open', () => go('open')],
+    ['Copy full path', async () => {
+      if (!base) return toast('No folder known for this message', true);
+      try { const r = await api('open', { action: 'link', href, base, mode: 'path' }); await navigator.clipboard.writeText(r.message); toast('Path copied'); }
+      catch (err) { toast(err.message, true); }
+    }],
+  ]));
+}
+function contextMenu(e, items) {
+  e.preventDefault();
+  closeMenu();
+  const menu = el('div', { class: 'ctx-menu', id: 'ctx-menu', role: 'menu' }, items.map(([label, fn]) =>
+    el('button', { type: 'button', role: 'menuitem', onclick: () => { closeMenu(); fn(); } }, label)));
+  document.body.append(menu);
+  const { innerWidth: w, innerHeight: h } = window, r = menu.getBoundingClientRect();
+  menu.style.left = Math.min(e.clientX, w - r.width - 8) + 'px';
+  menu.style.top = Math.min(e.clientY, h - r.height - 8) + 'px';
+  menu.querySelector('button').focus();
+}
+function closeMenu() { document.getElementById('ctx-menu')?.remove(); }
+document.addEventListener('click', (e) => { if (!e.target.closest('#ctx-menu')) closeMenu(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
+window.addEventListener('blur', closeMenu);
+const fileMenu = (f) => (e) => contextMenu(e, [
+  ['Open', () => act({ action: 'open-file', id: f.id })],
+  ['Show in folder', () => act({ action: 'reveal-file', id: f.id })],
+  ['Download', () => download(f)],
+]);
+
+// ---------- images & files ----------
+function openImage(src, file) {
+  const lb = $('#lightbox');
+  lb.querySelector('img').src = src;
+  $('#lightbox-bar').replaceChildren(...(file ? [
+    btn('open-app', 'Open', () => act({ action: 'open-file', id: file.id })),
+    btn('reveal', 'Show in folder', () => act({ action: 'reveal-file', id: file.id })),
+    btn('download', 'Download', () => download(file)),
+  ] : []));
+  lb.hidden = false;
+}
+$('#lightbox').addEventListener('click', (e) => { if (!e.target.closest('.lightbox-bar')) $('#lightbox').hidden = true; });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') $('#lightbox').hidden = true; });
+function download(f) {
+  const a = el('a', { href: `/api/file/${f.id}?download=1`, download: f.name });
+  document.body.append(a); a.click(); a.remove();
+}
+function gallery(items) {
+  if (!items.length) return null;
+  return el('div', { class: 'gallery' + (items.length === 1 ? ' single' : '') }, items.map((it) =>
+    el('figure', { oncontextmenu: it.file ? fileMenu(it.file) : null }, el('img', { src: it.src, loading: 'lazy', alt: it.file ? it.file.name : '', onclick: () => openImage(it.src, it.file) }),
+      it.file ? el('figcaption', { title: it.file.name }, it.file.name) : null)));
+}
+function attachments(files) {
+  if (!files || !files.length) return [];
+  const images = files.filter((f) => f.mime.startsWith('image/'));
+  const others = files.filter((f) => !f.mime.startsWith('image/'));
+  const out = [gallery(images.map((f) => ({ src: '/api/file/' + f.id, file: f })))];
+  if (others.length) {
+    out.push(el('div', { class: 'files' }, others.map((f) => el('div', { class: 'file', oncontextmenu: fileMenu(f) },
+      el('div', { class: 'file-icon' }, (f.name.split('.').pop() || 'file').slice(0, 4).toUpperCase()),
+      el('div', { style: 'min-width:0;flex:1' }, el('div', { class: 'file-name', title: f.name }, f.name), el('span', { class: 'file-size' }, size(f.size))),
+      el('div', { class: 'file-actions' },
+        el('button', { class: 'mini', type: 'button', title: 'Open', onclick: () => act({ action: 'open-file', id: f.id }) }, el('img', { src: ICON('open-app'), alt: 'Open' })),
+        el('button', { class: 'mini', type: 'button', title: 'Show in folder', onclick: () => act({ action: 'reveal-file', id: f.id }) }, el('img', { src: ICON('reveal'), alt: 'Show in folder' })),
+        el('button', { class: 'mini', type: 'button', title: 'Download', onclick: () => download(f) }, el('img', { src: ICON('download'), alt: 'Download' })))))));
+  }
+  return out.filter(Boolean);
+}
+
+// ---------- column 1: projects ----------
+function openCount(key) { return [...state.requests.values()].filter((r) => OPEN.includes(r.status) && (!key || r.project === key)).length; }
+function renderProjects() {
+  $('#all-open').textContent = openCount() || '';
+  $('#nav-all').classList.toggle('active', !state.project);
+  $('#projects').replaceChildren(...(state.projects.length ? state.projects.map((p) => {
+    const open = openCount(p.key);
+    const meta = [p.requests && `${p.requests} request${p.requests > 1 ? 's' : ''}`, p.chats && `${p.chats} chat${p.chats > 1 ? 's' : ''}`].filter(Boolean).join(' · ');
+    return el('button', { class: 'rail-item' + (p.virtual ? ' virtual' : '') + (state.project === p.key ? ' active' : ''), title: p.root || p.name,
+      onclick: () => selectProject(p.key) },
+    el('img', { src: ICON('folder'), alt: '' }),
+    el('span', { class: 'rail-name' }, p.name, el('span', { class: 'rail-meta' }, meta)),
+    el('span', { class: 'badge' }, open ? String(open) : ''));
+  }) : [el('div', { class: 'empty' }, 'Loading projects…')]));
+}
+function renderTeam() {
+  const busy = new Set([...state.requests.values()].filter((r) => r.status === 'working').map((r) => r.recipient));
+  const ids = ['human', ...teamOf(state.project)];
+  $('#team').replaceChildren(...ids.map((id) => [id, member(id)]).map(([id, m]) => el('div', { class: 'member', title: m.role },
+    avatar(id, true), el('b', {}, m.name),
+    id === 'human' ? null : el('span', { class: 'presence' + (busy.has(id) ? ' busy' : '') }, busy.has(id) ? 'working' : 'free'))));
+}
+function selectProject(key) {
+  state.project = key; save('project', key); renderTeam();
+  show({ type: 'room' });
+}
+$('#nav-all').onclick = () => selectProject(null);
+
+// ---------- column 2: project panel ----------
+function renderPanel() {
+  const p = projectOf(state.project);
+  $('#p-title').replaceChildren(el('img', { src: ICON(p ? 'folder' : 'team-room'), alt: '', style: 'width:20px;height:20px' }), p ? p.name : 'All activity');
+  $('#p-path').textContent = p ? (p.root || 'Chats without a single project folder') : 'Every project, newest first';
+  $('#p-actions').replaceChildren(...(p ? [
+    p.root ? btn('folder', 'Open folder', () => act({ action: 'folder', path: p.root })) : null,
+    p.root ? btn('open-app', 'Open in Codex', () => act({ action: 'codex-app', path: p.root })) : null,
+    btn('retry', 'Start fresh', () => startFresh(p)),
+  ].filter(Boolean) : []));
+  renderTeamCard(p);
+  $('#p-room').classList.toggle('active', state.view.type === 'room');
+  $('#p-room').querySelector('.row-hint').textContent = p ? 'everything in this project' : 'everything, all projects';
+  document.querySelectorAll('.row.chan').forEach((b) => b.classList.toggle('active', state.view.type === 'channel' && state.view.channel === b.dataset.channel));
+
+  // Requests
+  document.querySelectorAll('#req-filter button').forEach((b) => b.classList.toggle('on', b.dataset.f === state.reqFilter));
+  let reqs = [...state.requests.values()].filter((r) => (!state.project || r.project === state.project) && !requestHidden(r));
+  if (state.reqFilter === 'open') reqs = reqs.filter((r) => OPEN.includes(r.status));
+  $('#requests').replaceChildren(...(reqs.length ? reqs.map((r) => el('button', {
+    class: 'row' + (state.view.type === 'request' && state.view.id === r.id ? ' active' : ''), onclick: () => show({ type: 'request', id: r.id }) },
+  dotFor(r.recipient), el('span', { class: 'row-title', title: r.title }, r.title), pill(r.status),
+  el('span', { class: 'row-meta' }, `${member(r.sender).name} → ${member(r.recipient).name}`, state.project ? '' : ` · ${(projectOf(r.project) || {}).name || ''}`)))
+    : [el('div', { class: 'empty' }, state.reqFilter === 'open' ? 'No open requests. Ask Claude or Codex below.' : 'No requests yet.')]));
+
+  // Agent chats, grouped
+  const chats = state.sessions.filter((s) => !state.project || s.project === state.project);
+  const groups = [];
+  if (state.project) {
+    const team = chats.filter((s) => s.ongoing);
+    if (team.length) groups.push(['Team member chats', team]);
+    for (const prov of ['claude', 'codex']) {
+      const list = chats.filter((s) => s.provider === prov && !s.teamChat);
+      if (list.length) groups.push([`Your ${member(prov).name} chats`, list]);
+    }
+    const older = chats.filter((s) => s.teamChat && !s.ongoing);
+    if (older.length) groups.push(['older', older]);
+  } else {
+    const byProject = new Map();
+    for (const s of chats.slice(0, 40)) {
+      const name = (projectOf(s.project) || {}).name || 'Other';
+      if (!byProject.has(name)) byProject.set(name, []);
+      byProject.get(name).push(s);
+    }
+    groups.push(...byProject);
+  }
+  const chatRow = (s) => el('button', {
+      class: 'row' + (state.view.type === 'chat' && state.view.id === s.id ? ' active' : ''), title: `${s.title}\n${s.cwd || ''}`,
+      onclick: () => show({ type: 'chat', provider: s.provider, id: s.id, title: s.title, cwd: s.cwd }) },
+    el('span', { class: 'dot ' + s.provider }), el('span', { class: 'row-title' }, s.title),
+    s.ongoing ? el('span', { class: 'tag' }, 'TEAM') : el('span'),
+    el('span', { class: 'row-meta' }, `${member(s.provider).name} · ${ago(s.updated)}`));
+  $('#chats').replaceChildren(...(groups.length ? groups.flatMap(([title, list]) => title === 'older'
+    ? [el('details', { class: 'older' }, el('summary', {}, `Earlier one-off request chats (${list.length})`), ...list.map(chatRow))]
+    : [el('div', { class: 'sub-title' }, title), ...list.map(chatRow)])
+    : [el('div', { class: 'empty' }, 'No Claude or Codex chats in this project yet.')]));
+}
+document.querySelectorAll('#req-filter button').forEach((b) => b.addEventListener('click', () => {
+  state.reqFilter = b.dataset.f; save('reqFilter', state.reqFilter); renderPanel();
+}));
+$('#p-room').onclick = () => show({ type: 'room' });
+document.querySelectorAll('.row.chan').forEach((b) => { b.onclick = () => show({ type: 'channel', channel: b.dataset.channel }); });
+$('#refresh-chats').onclick = async () => { await loadSessions(true); toast('Chats refreshed'); };
+
+// ---------- column 3: mailbox feed ----------
+function isOld(created, key) {
+  const c = state.cleared[key];
+  return !!c && created < c && !state.showOlder.has(key);
+}
+const requestHidden = (r) => !OPEN.includes(r.status) && isOld(r.created, r.project);
+function messageProject(m) { return m.request_id ? (state.requests.get(m.request_id) || {}).project : m.project; }
+function messageNode(m, inRoom) {
+  const req = m.request_id ? state.requests.get(m.request_id) : null;
+  const who = member(m.sender);
+  const base = req ? req.cwd : (projectOf(m.project) || {}).root;
+  const where = !state.project && inRoom && messageProject(m) ? (projectOf(messageProject(m)) || {}).name : null;
+  const head = el('div', { class: 'msg-head' }, el('span', { class: 'msg-name' }, who.name),
+    el('span', { class: 'msg-time' }, time(m.created)), where ? el('span', { class: 'msg-where' }, '· ' + where) : null);
+
+  if (m.kind === 'request' && req) {
+    const card = el('div', { class: 'request-card', title: 'Open this request', onclick: (e) => { if (!e.target.closest('a,button,figure')) show({ type: 'request', id: req.id }); } },
+      el('div', { class: 'rc-top' }, el('span', {}, `Request for ${member(req.recipient).name}`), pill(req.status),
+        req.status === 'held' ? el('span', { class: 'held-actions' },
+          btn('send', 'Send', (e) => { e.stopPropagation(); release(req); }, 'primary'),
+          btn('cancel', 'Dismiss', (e) => { e.stopPropagation(); cancel(req, true); }, 'danger')) : null),
+      el('div', { class: 'rc-title' }, req.title),
+      req.cwd ? el('div', { class: 'rc-folder' }, req.cwd) : null,
+      m.body && m.body !== req.title ? markdown(m.body, base) : null,
+      ...attachments(m.files));
+    return el('div', { class: 'msg ' + m.sender }, avatar(m.sender), el('div', { class: 'msg-body' }, head, card));
+  }
+  if (['working', 'queued', 'cancelled'].includes(m.kind) || (m.kind === 'note' && !m.files.length)) {
+    return el('div', { class: 'status-line' }, avatar(m.sender, true),
+      el('span', {}, m.kind === 'working' ? `${who.name} started ` : m.kind === 'cancelled' ? `${who.name} cancelled ` : `${who.name}: ${m.body.replace(/[*`_]/g, '')} `,
+        m.kind !== 'note' && req ? el('b', {}, req.title) : null),
+      el('span', { class: 'msg-time' }, time(m.created)));
+  }
+  const bubble = el('div', { class: 'bubble' + (m.kind === 'done' ? ' done-card' : m.kind === 'failed' ? ' failed-card' : '') });
+  if (req && (inRoom || m.kind === 'done' || m.kind === 'failed')) {
+    const link = el('a', { href: '#', onclick: (e) => { e.preventDefault(); show({ type: 'request', id: req.id }); } }, req.title);
+    bubble.append(el('div', { class: 'kind' },
+      m.kind === 'done' ? [el('img', { class: 'done-icon', src: ICON('done'), alt: '' }), 'Finished · ', link]
+        : m.kind === 'failed' ? ['✕ Could not finish · ', link] : ['Re: ', link]));
+  }
+  if (m.body) bubble.append(markdown(m.body, base));
+  bubble.append(...attachments(m.files));
+  return el('div', { class: 'msg ' + m.sender }, avatar(m.sender), el('div', { class: 'msg-body' }, head, bubble));
+}
+function renderFeed(stick) {
+  const feed = $('#feed');
+  const atBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 80;
+  const v = state.view;
+  const inProject = (m) => (!state.project || messageProject(m) === state.project) && !isOld(m.created, messageProject(m));
+  const list = v.type === 'request' ? state.messages.filter((m) => m.request_id === v.id)
+    : v.type === 'channel' ? state.messages.filter((m) => inProject(m) && !m.request_id && (m.channel || 'general') === v.channel)
+    : state.messages.filter(inProject);
+  const nodes = [];
+  const key = state.project;
+  if (v.type !== 'request' && key && state.cleared[key]) {
+    const older = state.messages.filter((m) => messageProject(m) === key && m.created < state.cleared[key]).length;
+    const showing = state.showOlder.has(key);
+    nodes.push(el('div', { class: 'fresh-mark' }, el('img', { src: ICON('retry'), alt: '' }),
+      `Started fresh ${day(state.cleared[key]).toLowerCase()} at ${time(state.cleared[key])}.`,
+      older ? el('button', { type: 'button', class: 'link-btn', onclick: () => {
+        showing ? state.showOlder.delete(key) : state.showOlder.add(key); renderPanel(); renderFeed();
+      } }, showing ? 'Hide older messages' : `Show ${older} older message${older > 1 ? 's' : ''}`) : null));
+  }
+  let lastDay = '';
+  for (const m of list) {
+    const d = day(m.created);
+    if (d !== lastDay) { nodes.push(el('div', { class: 'day' }, d)); lastDay = d; }
+    nodes.push(messageNode(m, v.type !== 'request'));
+  }
+  if (!list.length) nodes.push(el('div', { class: 'empty', style: 'text-align:center;padding:0 0 60px' },
+    el('img', { class: 'empty-art', src: 'assets/empty-state.png', alt: '' }),
+    v.type === 'channel' ? `No messages in #${CHANNEL[v.channel]} yet. Say hi below — agents can post here with \`team say --channel ${v.channel}\`.`
+      : 'Nothing here yet. Ask a teammate for something below, or tell Claude or Codex to use the team-chat skill.'));
+  $('#feed-inner').replaceChildren(...nodes);
+  if (stick || atBottom) feed.scrollTop = feed.scrollHeight;
+}
+
+// ---------- column 3: app chat transcripts ----------
+function transcriptNode(msg, provider, asker, base) {
+  // In a team chat the "user" turns are the teammate's requests, not you.
+  const role = msg.role === 'tool' ? provider : msg.role === 'human' && asker ? asker : msg.role;
+  const body = el('div', { class: 'bubble' });
+  let tools = [], images = [];
+  const flush = () => {
+    if (images.length) { body.append(gallery(images.map((src) => ({ src })))); images = []; }
+    if (tools.length) {
+      body.append(el('details', { class: 'tools' }, el('summary', {}, tools.length === 1 ? '1 step' : `${tools.length} steps`), el('ul', {}, tools.map((t) => el('li', {}, t)))));
+      tools = [];
+    }
+  };
+  for (const p of msg.parts) {
+    if (p.type === 'tool') { if (images.length) flush(); tools.push(p.label); }
+    else if (p.type === 'image') images.push(p.src);
+    else { flush(); body.append(markdown(p.text, base)); }
+  }
+  flush();
+  return el('div', { class: 'msg ' + role }, avatar(role), el('div', { class: 'msg-body' },
+    el('div', { class: 'msg-head' }, el('span', { class: 'msg-name' }, member(role).name), el('span', { class: 'msg-time' }, time(msg.time))), body));
+}
+async function loadTranscript(stick) {
+  const v = state.view;
+  if (v.type !== 'chat') return;
+  try {
+    const msgs = await api(`transcript?provider=${v.provider}&id=${encodeURIComponent(v.id)}`);
+    if (state.view !== v) return;
+    const sig = msgs.length + ':' + JSON.stringify(msgs.at(-1) || '').length;
+    if (sig === state.transcriptSig && !stick) return;
+    state.transcriptSig = sig;
+    const feed = $('#feed');
+    const atBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 80;
+    const work = [...state.requests.values()].find((r) => r.worker_session === v.id);
+    const nodes = [];
+    let lastDay = '';
+    for (const m of msgs) {
+      const d = m.time ? day(m.time) : '';
+      if (d && d !== lastDay) { nodes.push(el('div', { class: 'day' }, d)); lastDay = d; }
+      nodes.push(transcriptNode(m, v.provider, work && work.sender, v.cwd));
+    }
+    if (!msgs.length) nodes.push(el('div', { class: 'empty' }, 'This chat has no readable messages yet.'));
+    $('#feed-inner').replaceChildren(...nodes);
+    if (stick || atBottom) feed.scrollTop = feed.scrollHeight;
+  } catch (e) {
+    $('#feed-inner').replaceChildren(el('div', { class: 'empty' }, 'Could not read this chat: ' + e.message));
+  }
+}
+
+// ---------- views ----------
+function headerFor(view) {
+  const actions = [];
+  const p = projectOf(state.project);
+  if (view.type === 'channel') {
+    $('#title').textContent = `# ${CHANNEL[view.channel]}${p ? ' · ' + p.name : ''}`;
+    $('#subtitle').textContent = view.channel === 'general' ? 'Updates and results for everyone. Free — no agent tokens are used here.'
+      : 'Talk ideas through. Free — agents only spend tokens when you ask them for work.';
+  } else if (view.type === 'room') {
+    $('#title').textContent = p ? `${p.name} · Activity` : 'All activity';
+    $('#subtitle').textContent = p ? 'Everything the team said, asked and delivered in this project' : 'Everything your team says, asks and delivers';
+  } else if (view.type === 'request') {
+    const r = state.requests.get(view.id);
+    $('#title').textContent = r ? r.title : 'Request';
+    $('#subtitle').replaceChildren(...(r ? [`${member(r.sender).name} asked ${member(r.recipient).name}`, pill(r.status)] : []));
+    if (r) {
+      if (r.status === 'held') {
+        actions.push(btn('send', 'Send', () => release(r), 'primary'));
+        actions.push(btn('cancel', 'Dismiss', () => cancel(r, true), 'danger'));
+      } else if (OPEN.includes(r.status)) actions.push(btn('cancel', 'Cancel', () => cancel(r), 'danger'));
+      else actions.push(btn('retry', 'Try again', () => retry(r)));
+      if (r.worker_session) actions.push(btn('app-chats', `${member(r.recipient).name}'s chat`, () =>
+        show({ type: 'chat', provider: appOf(r.recipient), id: r.worker_session, title: `${member(r.recipient).name} · ${r.title}`, cwd: r.cwd })));
+      if (r.cwd) actions.push(btn('folder', 'Open folder', () => act({ action: 'folder', path: r.cwd })));
+    }
+  } else {
+    $('#title').textContent = view.title || 'Chat';
+    $('#subtitle').textContent = `${member(view.provider).name} app chat${view.cwd ? ' · ' + view.cwd : ''}`;
+    if (view.provider === 'codex' && [...state.requests.values()].some((r) => r.worker_session === view.id))
+      $('#banner').textContent += ' If the Codex app says “This is open in another app”, wait until the request is done, then press Retry there (not Fork).';
+    if (view.provider === 'claude') actions.push(btn('open-app', 'Open in Claude', () => act({ action: 'claude-desktop', session: view.id })));
+    else if (view.cwd) actions.push(btn('open-app', 'Open in Codex', () => act({ action: 'codex-app', path: projectRoot(view.cwd) || view.cwd })));
+    if (view.cwd) actions.push(btn('folder', 'Open folder', () => act({ action: 'folder', path: view.cwd })));
+  }
+  $('#header-actions').replaceChildren(...actions);
+}
+function projectRoot(cwd) { const s = state.sessions.find((x) => x.cwd === cwd); return s && (projectOf(s.project) || {}).root; }
+async function release(r) {
+  try { await api('release', { id: r.id }); toast(`Sent to ${member(r.recipient).name}`); await poll(); show(state.view); } catch (e) { toast(e.message, true); }
+}
+async function cancel(r, dismiss) {
+  if (!dismiss && !confirm(`Cancel "${r.title}"? Files may be left half-changed.`)) return;
+  try { await api('cancel', { id: r.id }); toast('Cancelling…'); await poll(); show(state.view); } catch (e) { toast(e.message, true); }
+}
+async function retry(r) {
+  try { const n = await api('retry', { id: r.id }); toast('Sent again'); await poll(); show({ type: 'request', id: n.id }); } catch (e) { toast(e.message, true); }
+}
+function show(view) {
+  state.view = view;
+  state.transcriptSig = '';
+  const chat = view.type === 'chat';
+  $('#banner').hidden = !chat;
+  if (chat) $('#banner').textContent = `Live from the ${member(view.provider).name} app — read-only here. It updates as the chat goes on.`;
+  $('#composer').hidden = chat;
+  headerFor(view);  // may add to the banner
+  updateComposer();
+  renderProjects();
+  renderPanel();
+  if (chat) { $('#feed-inner').replaceChildren(el('div', { class: 'empty' }, 'Loading…')); loadTranscript(true); }
+  else renderFeed(true);
+}
+
+// ---------- composer ----------
+const text = $('#text');
+function renderTo() {
+  const ids = teamOf(state.project);
+  if (state.to !== 'team' && !ids.includes(state.to)) state.to = 'team';
+  $('#to').replaceChildren(el('button', { type: 'button', 'data-to': 'team', class: state.to === 'team' ? 'on' : '' },
+    state.view.type === 'channel' ? `# ${CHANNEL[state.view.channel]}` : 'Team'),
+  ...ids.map((id) => el('button', { type: 'button', 'data-to': id, class: state.to === id ? 'on' : '', title: member(id).role || '' },
+    dotFor(id), 'Ask ' + member(id).name)));
+}
+function updateComposer() {
+  renderTo();
+  const inRequest = state.view.type === 'request';
+  const asking = !inRequest && state.to !== 'team';
+  $('#composer-top').hidden = inRequest;
+  $('#ask-fields').hidden = !asking;
+  $('#run-wrap').hidden = !asking;
+  document.querySelectorAll('#to button').forEach((b) => b.classList.toggle('on', b.dataset.to === state.to));
+  const p = projectOf(state.project);
+  if (asking && !$('#req-cwd').dataset.touched) $('#req-cwd').value = (p && p.root) || '';
+  text.placeholder = inRequest ? 'Reply on this request…' : asking ? `Details for ${member(state.to).name} (optional — Markdown works)`
+    : `Message ${state.view.type === 'channel' ? '#' + CHANNEL[state.view.channel] : 'the team'}${p ? ' · ' + p.name : ''}…  (Enter to send · Shift+Enter for a new line)`;
+  $('#hint').textContent = asking ? `${member(state.to).name} works on this in its ongoing ${p ? p.name + ' ' : ''}chat and posts the result here.` : '';
+}
+$('#to').addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  state.to = b.dataset.to; updateComposer(); (state.to === 'team' ? text : $('#req-title')).focus();
+});
+$('#req-cwd').addEventListener('input', () => { $('#req-cwd').dataset.touched = '1'; });
+text.addEventListener('input', () => { text.style.height = 'auto'; text.style.height = Math.min(text.scrollHeight, 220) + 'px'; });
+text.addEventListener('keydown', (e) => {
+  if (mentionKey(e)) return;
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('#composer').requestSubmit(); }
+});
+// ---------- @mentions: tag a member; a busy one reads it mid-run, a free one gets it as a new request ----------
+const pop = $('#mention-pop');
+let picks = [], pick = 0;
+const busy = (id) => [...state.requests.values()].find((r) => r.recipient === id && r.status === 'working' && (!state.project || r.project === state.project));
+function mentionQuery() {
+  if (state.view.type === 'request' || state.to !== 'team') return null;
+  const m = text.value.slice(0, text.selectionStart).match(/(^|\s)@([\w-]*(?: [\w-]*)?)$/);
+  return m ? m[2] : null;
+}
+function showMentions() {
+  const q = mentionQuery();
+  const ids = teamOf(state.project);
+  picks = q === null ? [] : ids.filter((id) => {
+    const n = member(id).name.toLowerCase(), s = q.toLowerCase();
+    return n.startsWith(s) || id.toLowerCase().startsWith(s) || n.split(' ').some((w) => w.startsWith(s));
+  });
+  pop.hidden = !picks.length;
+  if (!picks.length) return;
+  pick = Math.min(pick, picks.length - 1);
+  pop.replaceChildren(...picks.map((id, i) => {
+    const job = busy(id);
+    return el('button', { type: 'button', role: 'option', class: i === pick ? 'on' : '', 'aria-selected': i === pick ? 'true' : 'false',
+      onmousedown: (e) => { e.preventDefault(); insertMention(id); } },
+      avatar(id, true), el('span', { class: 'mp-name' }, member(id).name),
+      el('span', { class: 'mp-state' + (job ? ' busy' : '') }, job ? `working · reads your note mid-run` : (state.manual?.[state.project] || []).includes(id) ? 'works in its own app · waits in its inbox' : 'free · starts a new request'));
+  }));
+}
+function insertMention(id) {
+  const caret = text.selectionStart, before = text.value.slice(0, caret).replace(/@[\w-]*(?: [\w-]*)?$/, ''), after = text.value.slice(caret);
+  const tag = '@' + member(id).name + ' ';
+  text.value = before + tag + after.replace(/^\s+/, '');
+  text.selectionStart = text.selectionEnd = before.length + tag.length;
+  pop.hidden = true; picks = [];
+  text.focus();
+}
+function mentionKey(e) {
+  if (pop.hidden || !picks.length) return false;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { pick = (pick + (e.key === 'ArrowDown' ? 1 : picks.length - 1)) % picks.length; showMentions(); }
+  else if (e.key === 'Enter' || e.key === 'Tab') insertMention(picks[pick]);
+  else if (e.key === 'Escape') pop.hidden = true;
+  else return false;
+  e.preventDefault();
+  return true;
+}
+text.addEventListener('input', showMentions);
+text.addEventListener('click', showMentions);
+text.addEventListener('blur', () => setTimeout(() => { pop.hidden = true; }, 120));
+$('#req-title').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('#composer').requestSubmit(); } });
+$('#composer').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  askNotify();
+  const body = text.value.trim();
+  const send = $('.send');
+  send.disabled = true;
+  try {
+    if (state.view.type === 'request') {
+      if (!body) return;
+      const sent = await api('say', { body, requestId: state.view.id });
+      if (sent.note === 'live') toast(`${member(state.requests.get(state.view.id).recipient).name} reads this mid-run and adapts`);
+      else if (sent.note === 'start') toast('Added to the request before it starts');
+    } else if (state.to === 'team') {
+      if (!body) return;
+      const sent = await api('say', { body, project: state.project, channel: state.view.type === 'channel' ? state.view.channel : 'general' });
+      if (sent.routedTo) toast(`${member(sent.routedTo).name} is reading your message`);
+      for (const m of sent.mentions || []) {
+        const n = member(m.id).name;
+        toast(m.how === 'live' ? `${n} is working: reads your note mid-run and adapts`
+          : m.how === 'inbox' ? `${n} works in its own app: waiting in its inbox` : `${n} is on it: new request started`);
+      }
+    } else {
+      const title = $('#req-title').value.trim() || body.split('\n')[0].slice(0, 120);
+      if (!title) { $('#req-title').focus(); toast('Write what you need first', true); return; }
+      const req = await api('ask', { to: state.to, title, body, run: $('#run').checked, cwd: $('#req-cwd').value.trim() });
+      $('#req-title').value = '';
+      delete $('#req-cwd').dataset.touched;
+      toast(`Sent to ${member(state.to).name}`);
+      await poll();
+      if (req.project !== undefined) state.project = req.project;
+      show({ type: 'request', id: req.id });
+    }
+    text.value = ''; text.style.height = 'auto';
+    await poll(true);
+  } catch (err) {
+    toast(err.message, true);
+  } finally { send.disabled = false; }
+});
+
+// ---------- notifications ----------
+function askNotify() { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission(); }
+function notifyDone(r) {
+  const label = r.status === 'done' ? 'finished' : 'could not finish';
+  toast(`${member(r.recipient).name} ${label}: ${r.title}`, r.status !== 'done');
+  if (document.hidden) document.title = `● ${member(r.recipient).name} ${label} · Crewroom`;
+  if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
+    const n = new Notification(`${member(r.recipient).name} ${label}`, { body: r.title, icon: 'assets/logo-mark.png' });
+    n.onclick = () => { window.focus(); show({ type: 'request', id: r.id }); };
+  }
+}
+window.addEventListener('focus', () => { document.title = 'Crewroom'; });
+
+// ---------- data ----------
+async function poll(stick) {
+  const data = await api('state?after=' + state.last);
+  state.members = data.members;
+  state.teams = data.teams || {};
+  state.manual = data.manual || {};
+  state.cleared = data.cleared || {};
+  let changed = false;
+  for (const r of data.requests) {
+    const before = state.requests.get(r.id);
+    if (!before || before.status !== r.status || before.worker_session !== r.worker_session) changed = true;
+    if (state.ready && before && before.status !== r.status && (r.status === 'done' || r.status === 'failed')) notifyDone(r);
+    state.requests.set(r.id, r);
+  }
+  state.ready = true;
+  const grew = data.messages.length > 0;
+  state.messages.push(...data.messages);
+  state.last = data.last;
+  renderTeam();
+  if (changed || grew) { renderProjects(); renderPanel(); if (state.view.type === 'request') headerFor(state.view); }
+  if (state.view.type !== 'chat' && (grew || stick || changed)) renderFeed(stick);
+}
+async function loadSessions() {
+  try {
+    const data = await api('sessions');
+    state.sessions = data.sessions;
+    state.projects = data.projects;
+    if (state.project && !projectOf(state.project)) state.project = null;
+    renderProjects(); renderPanel();
+    if (state.view.type === 'room') headerFor(state.view);
+  } catch { /* server restarting */ }
+}
+
+// ---------- start fresh ----------
+function choose(title, textBody, options) {
+  return new Promise((resolve) => {
+    const dlg = $('#choice');
+    $('#choice-title').textContent = title;
+    $('#choice-text').replaceChildren(...[].concat(textBody).map((t) => el('p', {}, t)));
+    $('#choice-buttons').replaceChildren(...options.map((o) => el('button', { type: 'button', class: 'btn ' + (o.cls || ''),
+      onclick: () => { dlg.close(); resolve(o.value); } }, o.label)));
+    dlg.onclose = () => resolve(null);
+    dlg.showModal();
+  });
+}
+async function startFresh(p) {
+  const pick = await choose(`Start fresh in “${p.name}”?`, [
+    'Start fresh: older messages and finished requests are hidden (you can show them again), and every team member starts a new chat next time — no old context, fewer tokens.',
+    'Delete history: permanently removes this project’s Crewroom messages and requests. Your project files and the chats inside the Claude and Codex apps are not touched.',
+  ], [
+    { label: 'Cancel', value: null },
+    { label: 'Delete history…', value: 'delete', cls: 'danger' },
+    { label: 'Start fresh', value: 'fresh', cls: 'primary' },
+  ]);
+  if (!pick) return;
+  if (pick === 'delete' && !confirm(`Permanently delete all Crewroom messages and requests for “${p.name}”? This cannot be undone.`)) return;
+  try {
+    await api('projects/clear', { key: p.key, mode: pick });
+    state.showOlder.delete(p.key);
+    if (pick === 'delete') {  // drop the removed messages from the window too
+      state.messages = []; state.last = 0;
+      for (const [id, r] of state.requests) if (r.project === p.key) state.requests.delete(id);
+    }
+    await poll(true);
+    await loadSessions(true);
+    show({ type: 'room' });
+    toast(pick === 'fresh' ? 'Fresh start — new chats for every member from now on' : 'History deleted');
+  } catch (e) { toast(e.message, true); }
+}
+
+// ---------- team setup (per project) ----------
+const settingsCache = new Map();
+async function projectSettings(key, fresh) {
+  if (!fresh && settingsCache.has(key)) return settingsCache.get(key);
+  const data = await api('project?key=' + encodeURIComponent(key)).catch(() => ({}));
+  settingsCache.set(key, data && data.settings ? data : null);
+  return settingsCache.get(key);
+}
+async function renderTeamCard(p) {
+  const card = $('#p-team');
+  if (!p || !p.root) { card.hidden = true; return; }
+  const saved = await projectSettings(p.key);
+  if (state.project !== p.key) return;
+  card.hidden = false;
+  if (!saved) {
+    card.replaceChildren(el('div', { class: 'muted', style: 'font-size:12px' }, 'No team roles yet for this project.'),
+      btn('team-room', 'Set up the team', () => openProjectDialog({ existing: p.root, name: p.name })));
+    return;
+  }
+  const st = saved.settings;
+  const open = load('teamOpen', false);
+  if (!open) {  // compact: one row of faces; click to see roles
+    card.replaceChildren(
+      el('button', { type: 'button', class: 'team-faces', title: 'Show roles', onclick: () => { save('teamOpen', true); renderTeamCard(p); } },
+        ...(st.members || []).map((m) => el('span', { class: 'face', title: `${m.name}: ${(m.roles || []).join('; ')}` }, avatar(m.id, true, m.hue), m.name)),
+        el('span', { class: 'face more' }, `▾ roles`)),
+      el('div', { class: 'team-actions' }, btn('team-room', 'Edit team', () => openProjectDialog({ edit: saved })),
+        st.coordinator ? el('span', { class: 'muted', style: 'font-size:11px' }, `Coordinator: ${member(st.coordinator).name}`) : null));
+    return;
+  }
+  const line = (id, name, model, jobs, hue) => el('div', { class: 'team-line' }, avatar(id, true, hue),
+    el('div', {}, el('b', {}, name, model ? el('span', { class: 'model' }, ` · ${model}`) : ''),
+      el('ul', { class: 'jobs' }, jobs.filter(Boolean).map((j) => el('li', { title: j }, j.split(' — ')[0])))));
+  card.replaceChildren(...(st.members || []).map((m) => line(m.id, m.name, m.model, m.roles || [], m.hue)),
+  line('human', 'You', '', [st.humanRole || 'Lead']),
+  ...(st.coordinator ? [el('div', { class: 'muted', style: 'font-size:11px' }, `Coordinator: ${member(st.coordinator).name} — reads your channel messages and routes work`)] : []),
+  el('div', { class: 'muted', style: 'font-size:11px' }, (st.freshEvery ?? 6) ? `Fresh agent chat every ${st.freshEvery ?? 6} requests` : 'Agent chats never restart'),
+  el('div', { class: 'team-actions' }, btn('team-room', 'Edit team', () => openProjectDialog({ edit: saved })),
+    el('button', { type: 'button', class: 'link-btn', onclick: () => { save('teamOpen', false); renderTeamCard(p); } }, 'Hide roles')));
+}
+
+let setupInfo = null;
+let dialogMode = 'new';
+let editing = null;
+async function openProjectDialog(opts = {}) {
+  const dlg = $('#project-dialog');
+  $('#dlg-err').textContent = '';
+  if (!setupInfo) {
+    $('#dlg-save').disabled = true;
+    dlg.showModal();
+    try { setupInfo = await api('setup-info'); } catch (e) { $('#dlg-err').textContent = e.message; return; }
+    $('#dlg-save').disabled = false;
+  } else if (!dlg.open) dlg.showModal();
+  editing = opts.edit || null;
+  const st = editing ? editing.settings : {};
+  const shared = st.shared || {};
+  const team = st.members || ['claude', 'codex'].map((app) => ({ app, name: app === 'claude' ? 'Claude' : 'Codex', ...setupInfo.defaults[app] }));
+  $('#dlg-title').textContent = editing ? `Team for ${editing.name}` : 'New project';
+  $('#dlg-sub').textContent = editing ? editing.root : 'Make a folder and set up who does what. Every team chat for it lives in that folder.';
+  $('#where').hidden = !!editing;
+  $('#f-open-codex').closest('label').hidden = !!editing;
+  $('#dlg-save').textContent = editing ? 'Save team' : 'Create project';
+  setMode(opts.existing ? 'existing' : 'new');
+  $('#f-name').value = opts.name && !opts.existing ? opts.name : '';
+  $('#f-parent').value = setupInfo.desktop;
+  $('#f-existing').value = opts.existing || '';
+  $('#f-human').value = st.humanRole || setupInfo.humanRole;
+  $('#f-fresh').value = st.freshEvery ?? setupInfo.freshEvery;
+  $('#f-agents').replaceChildren(...team.map((m) => agentCard(m)));
+  countMembers();
+  refreshCoordinator(st.coordinator || '', st.referee || '', st.supervisor || '');
+  for (const target of ['codex', 'claude']) {
+    const source = target === 'codex' ? 'claude' : 'codex';
+    const chosen = new Set(shared[target] || []);
+    $('#share-' + target).replaceChildren(...setupInfo.skills[source].filter((sk) => sk.name !== 'team-chat').map((sk) =>
+      el('label', { class: 'skill', title: sk.description, 'data-name': sk.name.toLowerCase() + ' ' + sk.description.toLowerCase() },
+        el('input', { type: 'checkbox', value: sk.name, checked: chosen.has(sk.name), onchange: countShared }),
+        el('b', {}, sk.name), el('small', {}, sk.description || ''))));
+  }
+  document.querySelectorAll('.share-search').forEach((i) => { i.value = ''; });
+  countShared();
+  (editing ? $('#f-agents .chip-role') : opts.existing ? $('#f-existing') : $('#f-name')).focus();
+}
+let cardSeq = 0;
+function agentCard(m) {
+  const app = m.app;
+  const key = 'm' + (++cardSeq);
+  const models = setupInfo.models[app];
+  const current = m.roles || [];
+  const chips = el('div', { class: 'chips' }, setupInfo.presets.map((t) => {
+    const [title, desc] = t.split(' — ');
+    return el('button', { type: 'button', class: 'chip-role' + (current.includes(t) ? ' on' : ''), 'data-role-value': t, title: desc || t,
+      onclick: (e) => e.currentTarget.classList.toggle('on') }, title);
+  }));
+  const custom = current.filter((x) => !setupInfo.presets.includes(x));
+  const name = el('input', { class: 'name-input', oninput: () => refreshCoordinator(), value: m.name || '', placeholder: app === 'codex' ? 'e.g. Designer' : 'e.g. Builder', maxlength: 40 });
+  const hue = m.hue ?? (m.id ? member(m.id).hue : undefined) ?? nextHue(app);
+  const pic = avatar(app, false, hue);
+  const shades = el('div', { class: 'shades' }, (setupInfo.hues || [0]).map((h) => el('button', {
+    type: 'button', class: 'shade' + (h === hue ? ' on' : ''), title: h ? `Shade ${h}°` : 'Original colour', 'data-hue': h,
+    onclick: (e) => {
+      card.dataset.hue = h;
+      shades.querySelectorAll('.shade').forEach((b) => b.classList.toggle('on', b === e.currentTarget));
+      pic.style.filter = h ? `hue-rotate(${h}deg)` : '';
+    } }, el('img', { src: member(app).avatar || '', alt: '', style: tint(h) }))));
+  const card = el('div', { class: 'agent-card ' + app, 'data-app': app, 'data-key': key, 'data-hue': hue },
+    el('button', { type: 'button', class: 'remove', title: 'Remove this member', onclick: () => {
+      if (document.querySelectorAll('#f-agents .agent-card').length < 2) return toast('Keep at least one member', true);
+      card.remove(); countMembers();
+    } }, '✕'),
+    el('div', { class: 'agent-top' }, pic, el('div', { style: 'flex:1;min-width:0;margin-right:22px' }, name,
+      el('span', {}, app === 'codex' ? 'Codex · ChatGPT models · images, shell, builds' : 'Claude · code, writing, review'))),
+    el('label', {}, 'Colour', shades),
+    el('label', {}, 'Roles — pick as many as you like', chips),
+    el('label', {}, 'Your own roles', el('textarea', { rows: 2, class: 'own-roles', placeholder: 'More roles, one per line — e.g. “Make the sound effects”' }, custom.join('\n'))),
+    el('label', {}, 'Model', el('select', { class: 'model' }, models.map((x) => el('option', { value: x.id, selected: x.id === (m.model || '') }, x.name)))),
+    el('label', { class: 'check', title: 'Use for the agent you chat with yourself (e.g. your open Claude Code session)' },
+      el('input', { type: 'checkbox', class: 'manual', checked: !!m.manual }), 'Works in my own app — don’t start it in the background'),
+    app === 'claude' ? el('label', { class: 'check', title: 'Lets this member run checks, builds, snapshots and renders itself. Deleting folders, git push/reset and system changes stay blocked.' },
+      el('input', { type: 'checkbox', class: 'shell', checked: !!m.shell }), 'Can run commands — checks, builds, renders (common destructive commands are refused; a guard-rail, not a sandbox)')
+      : el('div', { class: 'muted', style: 'font-size:12px' }, 'Codex runs commands in its own sandbox.'));
+  return card;
+}
+function membersFromDialog() {
+  return [...document.querySelectorAll('#f-agents .agent-card')].map((card) => ({
+    app: card.dataset.app,
+    name: card.querySelector('.name-input').value.trim(),
+    roles: [...card.querySelectorAll('.chip-role.on')].map((b) => b.dataset.roleValue)
+      .concat(card.querySelector('.own-roles').value.split('\n').map((x) => x.trim()).filter(Boolean)),
+    model: card.querySelector('select.model').value,
+    hue: Number(card.dataset.hue || 0),
+    manual: card.querySelector('.manual').checked,
+    shell: !!card.querySelector('.shell')?.checked,
+  }));
+}
+function nextHue(app) {
+  const used = new Set([...document.querySelectorAll(`#f-agents .agent-card[data-app=${app}]`)].map((c) => Number(c.dataset.hue)));
+  return (setupInfo.hues || [0]).find((h) => !used.has(h)) ?? 0;
+}
+function memberId(app, name) {
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30);
+  return !slug || slug === app ? app : `${app}-${slug}`;
+}
+function refreshCoordinator(selected, selectedReferee, selectedSupervisor) {
+  const options = membersFromDialog().filter((m) => m.name).map((m) => [memberId(m.app, m.name), `${m.name} (${m.app === 'codex' ? 'Codex' : 'Claude'})`]);
+  for (const [sel, keep, none] of [[$('#f-coordinator'), selected, 'None — I route work myself'],
+                                   [$('#f-referee'), selectedReferee, 'None — long chains wait for my OK'],
+                                   [$('#f-supervisor'), selectedSupervisor, 'None — Crewroom only restarts and retries']]) {
+    const value = keep ?? sel.value;
+    sel.replaceChildren(el('option', { value: '' }, none), ...options.map(([id, label]) => el('option', { value: id, selected: id === value }, label)));
+  }
+}
+function countMembers() {
+  refreshCoordinator();
+  const cards = [...document.querySelectorAll('#f-agents .agent-card')];
+  const c = cards.filter((x) => x.dataset.app === 'claude').length;
+  $('#member-count').textContent = `· ${cards.length} member${cards.length > 1 ? 's' : ''} (${c} Claude, ${cards.length - c} Codex)`;
+}
+function addMember(app) {
+  const n = document.querySelectorAll(`#f-agents .agent-card[data-app=${app}]`).length;
+  const base = app === 'codex' ? 'Codex' : 'Claude';
+  const card = agentCard({ app, name: n ? `${base} ${n + 1}` : base, roles: [] });
+  $('#f-agents').append(card);
+  countMembers();
+  card.querySelector('.name-input').select();
+  card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+$('#add-claude').onclick = () => addMember('claude');
+$('#add-codex').onclick = () => addMember('codex');
+function setMode(m) {
+  dialogMode = m;
+  document.querySelectorAll('#dlg-mode button').forEach((b) => b.classList.toggle('on', b.dataset.m === m));
+  $('#mode-new').hidden = m !== 'new';
+  $('#mode-existing').hidden = m !== 'existing';
+}
+function countShared() {
+  const a = document.querySelectorAll('#share-codex input:checked').length;
+  const b = document.querySelectorAll('#share-claude input:checked').length;
+  $('#share-count').textContent = a + b ? `· ${a} to Codex, ${b} to Claude` : '';
+}
+document.querySelectorAll('#dlg-mode button').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.m)));
+document.querySelectorAll('.share-search').forEach((input) => input.addEventListener('input', () => {
+  const q = input.value.trim().toLowerCase();
+  document.querySelectorAll(`#share-${input.dataset.for} .skill`).forEach((row) => { row.hidden = q && !row.dataset.name.includes(q); });
+}));
+$('#new-project').onclick = () => openProjectDialog();
+$('#dlg-close').onclick = $('#dlg-cancel').onclick = () => $('#project-dialog').close();
+$('#project-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const members = membersFromDialog();
+  const missing = members.find((m) => !m.name || !m.roles.length);
+  if (missing) { $('#dlg-err').textContent = missing.name ? `Give ${missing.name} at least one role` : 'Every member needs a name'; return; }
+  const team = { members, humanRole: $('#f-human').value.trim(), freshEvery: Number($('#f-fresh').value || 0),
+    coordinator: $('#f-coordinator').value, referee: $('#f-referee').value, supervisor: $('#f-supervisor').value };
+  const share = {
+    codex: [...document.querySelectorAll('#share-codex input:checked')].map((i) => i.value),
+    claude: [...document.querySelectorAll('#share-claude input:checked')].map((i) => i.value),
+  };
+  const body = editing ? { key: editing.key, ...team, share }
+    : { ...team, share, openCodex: $('#f-open-codex').checked, linkFiles: $('#f-link').checked,
+      ...(dialogMode === 'new' ? { name: $('#f-name').value.trim(), parent: $('#f-parent').value.trim() } : { existing: $('#f-existing').value.trim() }) };
+  $('#dlg-save').disabled = true;
+  try {
+    const made = await api(editing ? 'projects/update' : 'projects', body);
+    settingsCache.set(made.key, made);
+    $('#project-dialog').close();
+    toast(editing ? 'Team saved' : `Project “${made.name}” is ready`);
+    await loadSessions(true);
+    selectProject(made.key);
+  } catch (err) {
+    $('#dlg-err').textContent = err.message;
+  } finally { $('#dlg-save').disabled = false; }
+});
+
+(async function start() {
+  try { await poll(true); } catch (e) { toast('Crewroom server is not running', true); }
+  await loadSessions();
+  show({ type: 'room' });
+  setInterval(() => poll().catch(() => {}), 2000);
+  setInterval(loadSessions, 15000);
+  setInterval(() => loadTranscript(false), 4000);
+})();

@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Crewroom</title>
+<link rel="icon" type="image/png" href="assets/logo-mark.png">
+<link rel="stylesheet" href="vendor/hl-light.css" media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="vendor/hl-dark.css" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+  <!-- 1. Projects rail -->
+  <aside class="rail">
+    <div class="brand">
+      <img class="brand-mark" src="assets/logo-mark.png" alt="">
+      <div><div class="brand-name">Crewroom</div><div class="brand-sub">Your AI team, together</div></div>
+    </div>
+    <button class="rail-item" id="nav-all" title="Everything, across all projects">
+      <img src="assets/icon-team-room.png" alt=""><span class="rail-name">All activity</span><span class="badge" id="all-open"></span>
+    </button>
+    <div class="rail-title">Projects <button class="new-project" id="new-project" title="Create a project and set up the team">＋ New</button></div>
+    <div class="rail-list" id="projects"></div>
+    <div class="team" id="team"></div>
+  </aside>
+
+  <!-- 2. Conversation -->
+  <main class="main">
+    <header class="header">
+      <div class="header-text">
+        <h1 id="title">All activity</h1>
+        <div class="subtitle" id="subtitle"></div>
+      </div>
+      <div class="header-actions" id="header-actions"></div>
+    </header>
+    <div class="banner" id="banner" hidden></div>
+    <div class="feed" id="feed"><div class="feed-inner" id="feed-inner"></div></div>
+
+    <form class="composer" id="composer" autocomplete="off">
+      <div class="composer-top" id="composer-top">
+        <div class="to-seg" id="to" role="radiogroup" aria-label="Send to">
+          <button type="button" data-to="team" class="on">Team room</button>
+          <button type="button" data-to="claude"><span class="dot claude"></span>Ask Claude</button>
+          <button type="button" data-to="codex"><span class="dot codex"></span>Ask Codex</button>
+        </div>
+        <label class="run" id="run-wrap" hidden title="Start the work now in the background"><input type="checkbox" id="run" checked> Start now</label>
+      </div>
+      <div class="ask-fields" id="ask-fields" hidden>
+        <input id="req-title" placeholder="What should they do?  e.g. Make 6 cozy app icons">
+        <div class="folder-line"><img src="assets/icon-folder.png" alt=""><input id="req-cwd" placeholder="Work folder (full path)"></div>
+      </div>
+      <div class="composer-box">
+        <div class="mention-pop" id="mention-pop" role="listbox" hidden></div>
+        <textarea id="text" rows="1"></textarea>
+        <button class="send" type="submit" title="Send (Enter)"><img src="assets/icon-send.png" alt="Send"></button>
+      </div>
+      <div class="composer-hint" id="hint"></div>
+    </form>
+  </main>
+
+  <!-- 3. Project panel (right) -->
+  <aside class="panel">
+    <div class="panel-head">
+      <div class="panel-title" id="p-title">All activity</div>
+      <div class="panel-path" id="p-path"></div>
+      <div class="panel-actions" id="p-actions"></div>
+      <div class="team-card" id="p-team" hidden></div>
+    </div>
+    <div class="panel-scroll">
+      <button class="row room" id="p-room"><img class="row-icon" src="assets/icon-team-room.png" alt=""><span class="row-title">Activity</span><span class="row-hint">everything, newest last</span></button>
+      <button class="row room chan" data-channel="general"><span class="hash">#</span><span class="row-title">General</span><span class="row-hint">updates and results to share</span></button>
+      <button class="row room chan" data-channel="discussion"><span class="hash">#</span><span class="row-title">Discussion</span><span class="row-hint">talk ideas through with the team</span></button>
+      <div class="group-title"><img src="assets/icon-requests.png" alt="">Requests
+        <span class="seg" id="req-filter"><button data-f="open" class="on">Open</button><button data-f="all">All</button></span>
+      </div>
+      <div id="requests"></div>
+      <div class="group-title"><img src="assets/icon-app-chats.png" alt="">Agent chats
+        <button class="icon-btn" id="refresh-chats" title="Refresh chats"><img src="assets/icon-refresh.png" alt="Refresh"></button>
+      </div>
+      <div id="chats"></div>
+    </div>
+  </aside>
+</div>
+
+<div class="lightbox" id="lightbox" hidden>
+  <img alt="">
+  <div class="lightbox-bar" id="lightbox-bar"></div>
+</div>
+
+<dialog class="dialog" id="project-dialog">
+  <form method="dialog" id="project-form" autocomplete="off">
+    <header class="dlg-head">
+      <img src="assets/icon-folder.png" alt="">
+      <div><h2 id="dlg-title">New project</h2><p id="dlg-sub">Make a folder and set up who does what. Every team chat for it lives in that folder.</p></div>
+      <button type="button" class="dlg-x" id="dlg-close" title="Close">✕</button>
+    </header>
+    <div class="dlg-body">
+      <section id="where">
+        <div class="seg big" id="dlg-mode"><button type="button" data-m="new" class="on">New folder</button><button type="button" data-m="existing">Use an existing folder</button></div>
+        <div class="grid2" id="mode-new">
+          <label>Project name<input id="f-name" placeholder="e.g. Cozy Recipes App"></label>
+          <label>Create it inside<input id="f-parent" class="mono"></label>
+        </div>
+        <div id="mode-existing" hidden>
+          <label>Folder<input id="f-existing" class="mono" placeholder="C:\Users\…\Desktop\My App"></label>
+          <label class="check"><input type="checkbox" id="f-link" checked> Add a short “Team” note to this folder’s AGENTS.md / CLAUDE.md (if they exist)</label>
+        </div>
+      </section>
+
+      <section>
+        <h3>Team members <span class="muted" id="member-count"></span></h3>
+        <p class="muted small">Add as many Claude and Codex members as you like (e.g. two Codex designers and a Claude builder). Each gets its own chat, roles and model; different members can work at the same time.</p>
+        <div class="agents" id="f-agents"></div>
+        <div class="add-row"><button type="button" class="btn" id="add-claude"><span class="dot claude"></span>Add a Claude member</button>
+          <button type="button" class="btn" id="add-codex"><span class="dot codex"></span>Add a Codex member</button></div>
+        <div class="grid2">
+          <label>Your role<input id="f-human" placeholder="Lead — sets goals and approves the results"></label>
+          <label>Start a fresh agent chat every … requests (saves tokens; 0 = never)<input id="f-fresh" type="number" min="0" max="50"></label>
+        </div>
+        <label>Coordinator — reads your channel messages, sharpens everyone's orders and sends each to the member who fits best
+          <select id="f-coordinator"></select></label>
+        <label>Referee — steps in when a hand-off chain runs long: drops loops and duplicates, sends on only what's needed
+          <select id="f-referee"></select></label>
+        <label>Supervisor — watches every order; restarts stuck ones, retries failures once, then diagnoses and fixes what still fails
+          <select id="f-supervisor"></select></label>
+      </section>
+
+      <section>
+        <h3>Share skills between the agents <span class="muted" id="share-count"></span></h3>
+        <p class="muted small">Copies the picked skills into this project only (Codex reads <code>.agents/skills</code>, Claude reads <code>.claude/skills</code>). Your global setup is not changed.</p>
+        <div class="share">
+          <div class="share-col"><div class="share-head"><span class="dot claude"></span>Claude’s skills → give to Codex</div>
+            <input class="share-search" data-for="codex" placeholder="Search…"><div class="share-list" id="share-codex"></div></div>
+          <div class="share-col"><div class="share-head"><span class="dot codex"></span>Codex’s skills → give to Claude</div>
+            <input class="share-search" data-for="claude" placeholder="Search…"><div class="share-list" id="share-claude"></div></div>
+        </div>
+      </section>
+      <label class="check"><input type="checkbox" id="f-open-codex" checked> Open the project in the Codex app afterwards</label>
+    </div>
+    <footer class="dlg-foot">
+      <span class="dlg-err" id="dlg-err"></span>
+      <button type="button" class="btn" id="dlg-cancel">Cancel</button>
+      <button type="submit" class="btn primary" id="dlg-save">Create project</button>
+    </footer>
+  </form>
+</dialog>
+<dialog class="dialog small-dialog" id="choice">
+  <div class="dlg-head"><img src="assets/icon-retry.png" alt=""><div><h2 id="choice-title"></h2></div></div>
+  <div class="dlg-body" id="choice-text"></div>
+  <div class="dlg-foot" id="choice-buttons"></div>
+</dialog>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<script src="vendor/marked.js"></script>
+<script src="vendor/purify.js"></script>
+<script src="vendor/highlight.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

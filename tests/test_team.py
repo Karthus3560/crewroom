@@ -1,0 +1,473 @@
+"""Run with: python -m unittest discover -s tests"""
+import json
+import os
+import sys
+import tempfile
+import threading
+import time
+import unittest
+import urllib.error
+import urllib.request
+from contextlib import redirect_stdout
+from io import StringIO
+from pathlib import Path
+
+TMP = tempfile.mkdtemp()
+os.environ['TEAMCHAT_DATA'] = TMP
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from teamchat import cli, paths, server, transcripts, worker  # noqa: E402
+from teamchat.db import Mailbox  # noqa: E402
+
+
+class MailboxTests(unittest.TestCase):
+    def setUp(self):
+        self.mb = Mailbox(Path(TMP) / f'{self.id()}.db')
+
+    def tearDown(self):
+        self.mb.close()
+
+    def test_request_lifecycle_with_attachment(self):
+        req = self.mb.ask('claude', 'codex', 'Make icons', 'two **PNGs**')
+        self.assertEqual(req['status'], 'asked')
+        self.assertEqual([r['id'] for r in self.mb.requests('codex', open_only=True)], [req['id']])
+        self.mb.set_status(req['id'], 'done', 'codex', 'Here', files=[__file__])
+        self.assertEqual(self.mb.request(req['id'])['status'], 'done')
+        self.assertEqual(self.mb.requests('codex', open_only=True), [])
+        done = self.mb.messages(rid=req['id'])[-1]
+        self.assertEqual(done['files'][0]['name'], 'test_team.py')
+        self.assertEqual(self.mb.attachment(done['files'][0]['id'])['path'], str(Path(__file__).resolve()))
+
+    def test_rejects_bad_members_and_missing_files(self):
+        with self.assertRaises(ValueError):
+            self.mb.ask('claude', 'claude', 'self')
+        with self.assertRaises(ValueError):
+            self.mb.ask('claude', 'gemini', 'who')
+        with self.assertRaises(FileNotFoundError):
+            self.mb.ask('claude', 'codex', 'x', files=['missing.png'])
+        self.assertEqual(self.mb.requests(), [])  # failed attachment rolled the request back
+
+    def test_attached_paths(self):
+        req = self.mb.ask('claude', 'codex', 'x', files=[__file__])
+        self.assertIn(str(Path(__file__).resolve()), self.mb.attached_paths())
+
+    def test_messages_after_cursor(self):
+        self.mb.say('human', 'one')
+        first = self.mb.messages()[-1]['seq']
+        self.mb.say('codex', 'two')
+        self.assertEqual([m['body'] for m in self.mb.messages(after=first)], ['two'])
+
+
+class CliTests(unittest.TestCase):
+    def run_cli(self, *args):
+        out = StringIO()
+        with redirect_stdout(out):
+            code = cli.main(list(args))
+        return code, out.getvalue()
+
+    def test_ask_inbox_done_show(self):
+        code, out = self.run_cli('--as', 'claude', 'ask', 'codex', 'Write tests', '--cwd', TMP)
+        self.assertEqual(code, 0)
+        rid = out.split('request ')[1].split()[0]
+        self.assertIn(rid, self.run_cli('--as', 'codex', 'inbox')[1])
+        self.run_cli('--as', 'codex', 'done', rid, 'All **green**')
+        self.assertIn('Inbox empty', self.run_cli('--as', 'codex', 'inbox')[1])
+        self.assertIn('All **green**', self.run_cli('show', rid)[1])
+
+    def test_identity_detection(self):
+        env = dict(os.environ)
+        try:
+            for k in [k for k in os.environ if k.startswith(('CLAUDE', 'CODEX_', 'TEAMCHAT_AS'))]:
+                os.environ.pop(k)
+            self.assertEqual(cli.whoami(), 'human')
+            os.environ['CODEX_SANDBOX'] = 'seatbelt'
+            self.assertEqual(cli.whoami(), 'codex')
+            os.environ['CLAUDECODE'] = '1'
+            self.assertEqual(cli.whoami(), 'claude')
+            self.assertEqual(cli.whoami('human'), 'human')
+        finally:
+            os.environ.clear()
+            os.environ.update(env)
+
+
+class TranscriptTests(unittest.TestCase):
+    def setUp(self):
+        home = Path(tempfile.mkdtemp())
+        self.claude = home / 'projects'
+        self.codex = home / 'codex'
+        (self.claude / 'proj').mkdir(parents=True)
+        (self.codex / 'sessions' / '2026' / '10' / '30').mkdir(parents=True)
+        self.saved = (paths.CLAUDE_PROJECTS, paths.CODEX_HOME, paths.CODEX_SESSIONS)
+        paths.CLAUDE_PROJECTS, paths.CODEX_HOME, paths.CODEX_SESSIONS = self.claude, self.codex, self.codex / 'sessions'
+
+    def tearDown(self):
+        paths.CLAUDE_PROJECTS, paths.CODEX_HOME, paths.CODEX_SESSIONS = self.saved
+
+    def write(self, path, rows):
+        path.write_text('\n'.join(json.dumps(r) for r in rows) + '\n', encoding='utf-8')
+
+    def test_claude_chat_is_cleaned(self):
+        sid = '11111111-2222-3333-4444-555555555555'
+        self.write(self.claude / 'proj' / f'{sid}.jsonl', [
+            {'type': 'user', 'cwd': 'C:/x', 'message': {'content': '<system-reminder>hidden</system-reminder>'}},
+            {'type': 'user', 'cwd': 'C:/x', 'message': {'content': 'Build a **calculator**'}},
+            {'type': 'assistant', 'message': {'content': [{'type': 'thinking', 'thinking': 'secret'},
+                {'type': 'tool_use', 'name': 'Read', 'input': {'file_path': 'a.py'}},
+                {'type': 'text', 'text': 'Done!'}]}},
+            {'type': 'user', 'message': {'content': [{'type': 'tool_result', 'content': [
+                {'type': 'image', 'source': {'type': 'base64', 'media_type': 'image/png', 'data': 'AAAA'}}]}]}},
+            {'type': 'assistant', 'isSidechain': True, 'message': {'content': [{'type': 'text', 'text': 'subagent'}]}},
+            {'type': 'custom-title', 'customTitle': 'Calc chat'},
+        ])
+        self.assertEqual(transcripts.claude_sessions()[0]['title'], 'Calc chat')
+        msgs = transcripts.messages('claude', sid)
+        self.assertEqual([m['role'] for m in msgs], ['human', 'claude', 'tool'])
+        self.assertEqual(msgs[1]['parts'], [{'type': 'tool', 'label': 'Read: a.py'}, {'type': 'text', 'text': 'Done!'}])
+        self.assertTrue(msgs[2]['parts'][0]['src'].startswith('data:image/png;base64,'))
+        self.assertNotIn('secret', json.dumps(msgs))
+
+    def test_codex_chat_and_title(self):
+        sid = '01a18c74-0000-7000-8000-000000000001'
+        self.write(self.codex / 'sessions' / '2026' / '10' / '30' / f'rollout-2026-10-30T13-00-00-{sid}.jsonl', [
+            {'type': 'session_meta', 'payload': {'cwd': 'C:/y'}},
+            {'type': 'response_item', 'payload': {'type': 'message', 'role': 'developer', 'content': [{'type': 'input_text', 'text': 'rules'}]}},
+            {'type': 'response_item', 'payload': {'type': 'message', 'role': 'user', 'content': [{'type': 'input_text', 'text': '<environment_context>x'}]}},
+            {'type': 'response_item', 'payload': {'type': 'message', 'role': 'user', 'content': [{'type': 'input_text', 'text': 'Make 6 icons'}]}},
+            {'type': 'response_item', 'payload': {'type': 'custom_tool_call', 'name': 'exec', 'input': 'ls'}},
+            {'type': 'response_item', 'payload': {'type': 'message', 'role': 'assistant', 'content': [{'type': 'output_text', 'text': 'Here they are'}]}},
+        ])
+        self.write(self.codex / 'session_index.jsonl', [{'id': sid, 'thread_name': 'Icon job'}])
+        self.assertEqual(transcripts.codex_sessions()[0]['title'], 'Icon job')
+        msgs = transcripts.messages('codex', sid)
+        self.assertEqual([m['role'] for m in msgs], ['human', 'codex'])
+        self.assertEqual(msgs[1]['parts'][0], {'type': 'tool', 'label': 'exec: ls'})
+
+    def test_rejects_path_like_ids(self):
+        for bad in ('../x', 'a/b', '', 'x' * 80):
+            with self.assertRaises(KeyError):
+                transcripts.messages('claude', bad)
+
+
+class WorkerTests(unittest.TestCase):
+    def test_changed_files_prefers_media(self):
+        root = Path(tempfile.mkdtemp())
+        (root / 'old.txt').write_text('a')
+        before = worker.snapshot(root)
+        time.sleep(0.05)
+        (root / 'notes.md').write_text('b')
+        (root / 'pic.png').write_bytes(b'png')
+        (root / 'node_modules').mkdir()
+        (root / 'node_modules' / 'skip.js').write_text('c')
+        found = [Path(p).name for p in worker.changed_files(before, root)]
+        self.assertEqual(found, ['pic.png', 'notes.md'])
+
+
+class ServerTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.httpd = server.ThreadingHTTPServer(('127.0.0.1', 0), server.Handler)
+        cls.port = cls.httpd.server_address[1]
+        threading.Thread(target=cls.httpd.serve_forever, daemon=True).start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.httpd.shutdown()
+
+    def call(self, path, body=None, headers=None):
+        h = {'Content-Type': 'application/json', 'Origin': f'http://127.0.0.1:{self.port}'} if body is not None else {}
+        h.update(headers or {})
+        req = urllib.request.Request(f'http://127.0.0.1:{self.port}{path}',
+            data=json.dumps(body).encode() if body is not None else None, headers=h)
+        try:
+            with urllib.request.urlopen(req) as r:
+                return r.status, r.read()
+        except urllib.error.HTTPError as e:
+            return e.code, e.read()
+
+    def test_page_and_state(self):
+        code, page = self.call('/')
+        self.assertEqual(code, 200)
+        self.assertIn(b'Crewroom', page)
+        code, data = self.call('/api/state')
+        self.assertIn('claude', json.loads(data)['members'])
+
+    def test_static_traversal_blocked(self):
+        self.assertEqual(self.call('/../teamchat/db.py')[0], 404)
+        self.assertEqual(self.call('/%2e%2e/teamchat/db.py')[0], 404)
+
+    def test_host_and_origin_guards(self):
+        self.assertEqual(self.call('/api/state', headers={'Host': 'evil.example'})[0], 403)
+        self.assertEqual(self.call('/api/say', {'body': 'hi'}, {'Origin': 'http://evil.example'})[0], 403)
+        self.assertEqual(self.call('/api/say', {'body': 'hi'})[0], 200)
+
+    def test_human_ask_validation(self):
+        self.assertEqual(self.call('/api/ask', {'to': 'human', 'title': 'x'})[0], 400)
+        self.assertEqual(self.call('/api/ask', {'to': 'codex', 'title': 'x', 'cwd': 'Z:/nope/nope'})[0], 400)
+        code, data = self.call('/api/ask', {'to': 'codex', 'title': 'Queue only'})
+        self.assertEqual((code, json.loads(data)['status']), (200, 'asked'))
+
+    def test_unknown_attachment_is_404(self):
+        self.assertEqual(self.call('/api/file/nope')[0], 404)
+
+
+class SetupTests(unittest.TestCase):
+    def test_create_project_roles_and_shared_skills(self):
+        from teamchat import setup, projects
+        home = Path(tempfile.mkdtemp())
+        claude_skill = home / 'claude-skills' / 'draw'
+        claude_skill.mkdir(parents=True)
+        (claude_skill / 'SKILL.md').write_text('---\nname: draw\ndescription: >\n  Make images\n  with Codex.\n---\n',
+                                               encoding='utf-8')
+        saved = dict(setup.SKILL_DIRS)
+        setup.SKILL_DIRS.update(claude=[home / 'claude-skills'], codex=[home / 'codex-skills'])
+        try:
+            self.assertEqual(setup.list_skills()['claude'][0]['description'], 'Make images with Codex.')
+            mb = Mailbox(Path(TMP) / 'setup.db')
+            team = [{'app': 'claude', 'name': 'Claude', 'roles': ['Lead builder']},
+                    {'app': 'codex', 'name': 'Designer', 'roles': ['Designer', 'Icons'], 'model': 'gpt-x'},
+                    {'app': 'codex', 'name': 'Tester', 'roles': ['Runs checks']}]
+            made = setup.create({'name': 'Demo', 'parent': str(home), 'share': {'codex': ['draw']}, 'members': team}, mb)
+            root = Path(made['root'])
+            self.assertTrue((root / '.agents' / 'skills' / 'draw' / 'SKILL.md').exists())
+            self.assertIn('`codex-designer`', (root / 'TEAM.md').read_text(encoding='utf-8'))
+            self.assertIn('TEAM.md', (root / 'AGENTS.md').read_text(encoding='utf-8'))
+            self.assertEqual(projects.root_of(root / 'assets')[0], made['key'])
+            ids = [m['id'] for m in mb.project(made['key'])['settings']['members']]
+            self.assertEqual(ids, ['claude', 'codex-designer', 'codex-tester'])
+            self.assertEqual(mb.project(made['key'])['settings']['members'][1]['model'], 'gpt-x')
+            self.assertIn('codex-tester', mb.member_ids())
+            mb.ask('claude', 'codex-tester', 'Run the checks', cwd=str(root))  # project members can be asked
+            with self.assertRaises(ValueError):
+                setup.update({'key': made['key'], 'members': team + [{'app': 'codex', 'name': 'tester', 'roles': ['x']}]}, mb)
+            with self.assertRaises(ValueError):
+                setup.update({'key': made['key'], 'members': [{'app': 'codex', 'name': 'NoRoles', 'roles': []}]}, mb)
+            with self.assertRaises(ValueError):
+                setup.create({'name': 'bad/name', 'parent': str(home)}, mb)
+            with self.assertRaises(ValueError):
+                setup.create({'name': 'Demo', 'parent': str(home)}, mb)  # already exists
+            mb.close()
+        finally:
+            setup.SKILL_DIRS.clear()
+            setup.SKILL_DIRS.update(saved)
+            projects.set_saved_roots([])
+
+
+class FreshStartTests(unittest.TestCase):
+    def test_start_fresh_and_delete_history(self):
+        mb = Mailbox(Path(TMP) / 'fresh.db')
+        req = mb.ask('claude', 'codex', 'Old work')
+        mb.set_status(req['id'], 'done', 'codex', 'ok', files=[__file__])
+        mb.say('human', 'old chat', project='p1', channel='general')
+        mb.remember_session('p1', 'codex', 'thread-1', 3)
+        mb.start_fresh('p1')
+        self.assertIn('p1', mb.cleared())
+        self.assertEqual(mb.agent_session('p1', 'codex'), (None, 0))  # next request opens a new chat
+        self.assertEqual(len(mb.messages()), 3)                          # hidden, not deleted
+        mb.delete_history('p1', [req['id']])
+        self.assertEqual(mb.messages(), [])
+        self.assertEqual(mb.requests(), [])
+        self.assertEqual(mb.attached_paths(), set())
+        self.assertNotIn('p1', mb.cleared())
+        self.assertTrue(Path(__file__).exists())                        # files on disk are untouched
+        mb.close()
+
+
+class DispatchTests(unittest.TestCase):
+    def setUp(self):
+        from teamchat import dispatch
+        self.d = dispatch
+        self.mb = Mailbox(Path(TMP) / f'{self.id()}.db')
+        self.settings = {'members': [
+            {'id': 'codex-director', 'name': 'Director', 'app': 'codex', 'roles': ['Director']},
+            {'id': 'claude-producer', 'name': 'Producer', 'app': 'claude', 'roles': ['Coordinator']},
+            {'id': 'codex-composer', 'name': 'Composer', 'app': 'codex', 'roles': ['Music']}],
+            'coordinator': 'claude-producer'}
+        self.started = []
+
+    def tearDown(self):
+        self.mb.close()
+
+    def run_handle(self, who, text, depth=0):
+        self.mb.save_project('p', 'P', TMP, self.settings)
+        req = self.mb.ask('human', who, 'x', cwd=TMP) | {'depth': depth}
+        member = next(m for m in self.settings['members'] if m['id'] == who)
+        return self.d.handle(self.mb, req, member, self.settings, text, self.started.append, project='p')
+
+    def test_split_removes_block(self):
+        clean, orders, err = self.d.split('Done.\n```dispatch\n[{"to":"a","title":"t"}]\n```')
+        self.assertEqual((clean, len(orders), err), ('Done.', 1, None))
+
+    def test_orders_from_members_go_to_coordinator(self):
+        shown, notes = self.run_handle('codex-director', 'Plan ready.\n```dispatch\n[{"to":"codex-composer","title":"Re-time score","body":"b"}]\n```')
+        self.assertEqual(shown, 'Plan ready.')
+        req = self.mb.request(self.started[0])
+        self.assertEqual((req['recipient'], req['depth']), ('claude-producer', 0))  # routing hops are free
+        self.assertIn('Re-time score', req['body'])
+
+    def test_coordinator_dispatches_directly_and_skips_bad_orders(self):
+        _, notes = self.run_handle('claude-producer', 'ok\n```dispatch\n[{"to":"codex-composer","title":"Score"},{"to":"nobody","title":"x"},{"to":"claude-producer","title":"me"}]\n```')
+        self.assertEqual([self.mb.request(i)['recipient'] for i in self.started], ['codex-composer'])
+        self.assertEqual(sum('Skipped' in n for n in notes), 2)
+
+    def test_post_block_reaches_channel(self):
+        shown, _ = self.run_handle('claude-producer', 'Noted.' + chr(10) + '```post #general' + chr(10) + 'Got it, adding Arabic.' + chr(10) + '```')
+        self.assertEqual(shown, 'Noted.')
+        posted = [m for m in self.mb.messages() if m['channel'] == 'general']
+        self.assertEqual((posted[-1]['sender'], posted[-1]['body']), ('claude-producer', 'Got it, adding Arabic.'))
+
+    def test_long_chain_is_held_not_dropped(self):
+        _, notes = self.run_handle('claude-producer', '```dispatch\n[{"to":"codex-composer","title":"t"}]\n```', depth=8)
+        self.assertEqual(self.started, [])
+        held = [r for r in self.mb.requests() if r['status'] == 'held']
+        self.assertEqual([r['recipient'] for r in held], ['codex-composer'])
+        self.assertTrue(any('waiting for your OK' in n for n in notes))
+
+    def test_referee_steps_in_once(self):
+        self.settings['referee'] = 'codex-director'
+        self.run_handle('claude-producer', '```dispatch\n[{"to":"codex-composer","title":"t"}]\n```', depth=8)
+        ref = self.mb.request(self.started[0])
+        self.assertEqual((ref['recipient'], ref['refereed']), ('codex-director', 1))
+        # the referee's own orders get a few more steps
+        self.started.clear()
+        self.run_handle('codex-director', '```dispatch\n[{"to":"codex-composer","title":"merged"}]\n```', depth=8)
+        self.assertEqual(self.mb.request(self.started[0])['depth'], self.d.MAX_DEPTH - self.d.REFEREE_EXTRA + 1)
+
+
+class AddMemberTests(unittest.TestCase):
+    def test_coordinator_adds_member_when_asked(self):
+        from teamchat import dispatch
+        home = Path(tempfile.mkdtemp())
+        mb = Mailbox(Path(TMP) / 'add.db')
+        settings = {'members': [{'id': 'claude-producer', 'name': 'Producer', 'app': 'claude', 'roles': ['Coordinator']}],
+                    'coordinator': 'claude-producer'}
+        mb.save_project('p', 'P', str(home), settings)
+        req = mb.ask('human', 'claude-producer', 'add a 3d designer', cwd=str(home))
+        block = '```add-member' + chr(10) + '[{"app":"codex","name":"3D Designer","roles":["3D graphics"]}]' + chr(10) + '```'
+        shown, notes = dispatch.handle(mb, req, settings['members'][0], settings, 'Done. ' + block, lambda i: None, project='p')
+        ids = [m['id'] for m in mb.project('p')['settings']['members']]
+        self.assertEqual(ids, ['claude-producer', 'codex-3d-designer'])
+        self.assertIn('3D Designer', (home / 'TEAM.md').read_text(encoding='utf-8'))
+        self.assertEqual(shown, 'Done.')
+        # a plain member on another member's order may not add anyone
+        member = {'id': 'codex-3d-designer', 'name': '3D Designer', 'app': 'codex'}
+        req2 = mb.ask('claude-producer', 'codex-3d-designer', 'x', cwd=str(home))
+        _, notes2 = dispatch.handle(mb, req2, member, mb.project('p')['settings'], block.replace('3D Designer', 'Extra'), lambda i: None, project='p')
+        self.assertEqual(len(mb.project('p')['settings']['members']), 2)
+        self.assertTrue(any('Ignored' in n for n in notes2))
+        mb.close()
+
+
+class SupervisorTests(unittest.TestCase):
+    def setUp(self):
+        from teamchat import supervisor
+        self.s = supervisor
+        self.home = Path(tempfile.mkdtemp())
+        self.mb = Mailbox(Path(tempfile.mkdtemp()) / 'sup.db')
+        self.settings = {'members': [{'id': 'codex', 'name': 'Codex', 'app': 'codex', 'roles': []},
+                                     {'id': 'claude-boss', 'name': 'Boss', 'app': 'claude', 'roles': []}],
+                         'supervisor': 'claude-boss'}
+        self.mb.save_project('p', 'P', str(self.home), self.settings)
+        self.started = []
+
+    def tearDown(self):
+        self.mb.close()
+
+    def run_check(self):
+        from unittest import mock
+        with mock.patch.object(self.s.projects, 'root_of', return_value=('p', 'P', str(self.home))):
+            return self.s.check(self.mb, start=self.started.append)
+
+    def test_dead_worker_restarts_once_then_fails(self):
+        r = self.mb.ask('human', 'codex', 'make art', cwd=str(self.home))
+        self.mb.link(r['id'], worker_pid=999999)
+        self.mb.set_status(r['id'], 'working', 'codex')
+        self.assertEqual(self.run_check(), [('restarted', r['id'])])
+        self.mb.set_status(r['id'], 'working', 'codex')
+        self.assertEqual(self.run_check()[0], ('failed', r['id']))
+
+    def test_failure_retried_once_then_escalated(self):
+        r = self.mb.ask('human', 'codex', 'make art', cwd=str(self.home))
+        self.mb.set_status(r['id'], 'failed', 'codex', 'boom')
+        self.assertEqual(self.run_check(), [('retried', r['id'])])
+        retry = self.started[-1]
+        self.mb.set_status(retry, 'failed', 'codex', 'boom again')
+        did = self.run_check()
+        self.assertIn(('escalated', retry), did)
+        sup = self.mb.request(self.started[-1])
+        self.assertEqual((sup['recipient'], sup['sender']), ('claude-boss', 'codex'))
+        self.assertIn('boom', ''.join(m['body'] for m in self.mb.messages(rid=retry)))
+        self.assertEqual(self.run_check(), [])  # nothing is done twice
+
+    def test_old_failures_are_left_alone(self):
+        r = self.mb.ask('human', 'codex', 'old', cwd=str(self.home))
+        self.mb.set_status(r['id'], 'failed', 'codex', 'boom')
+        self.mb.db.execute("update requests set updated='2020-01-01T00:00:00+00:00'")
+        self.mb.db.commit()
+        self.assertEqual(self.run_check(), [])
+
+
+class ShellFlagTests(unittest.TestCase):
+    def test_flag_kept_for_claude_only_and_tools_follow_it(self):
+        from teamchat import members, worker
+        out = members.clean([{'app': 'claude', 'name': 'Montage', 'roles': ['x'], 'shell': True},
+                             {'app': 'codex', 'name': 'Codex', 'roles': ['y'], 'shell': True},
+                             {'app': 'claude', 'name': 'Critic', 'roles': ['z']}], None)
+        self.assertEqual([m['shell'] for m in out], [True, False, False])
+        on, off = worker.claude_tools(out[0]), worker.claude_tools(out[2])
+        self.assertIn('Bash', on[1])
+        self.assertIn('Bash(git push:*)', on[3])
+        self.assertIn('PowerShell(Remove-Item:*)', on[3])
+        self.assertEqual(off, ['--allowedTools', worker.READ_WRITE])
+        self.assertIn('runs commands', members.roles_text({'members': out}))
+
+
+class MentionTests(unittest.TestCase):
+    def setUp(self):
+        from unittest import mock
+        from teamchat import server, worker
+        self.server, self.worker = server, worker
+        self.home = Path(tempfile.mkdtemp())
+        self.mb = Mailbox(Path(tempfile.mkdtemp()) / 'm.db')
+        self.settings = {'members': [{'id': 'claude-montage', 'name': 'Montage', 'app': 'claude', 'roles': ['x']},
+                                     {'id': 'claude-3d-designer', 'name': '3D Designer', 'app': 'claude', 'roles': ['y']},
+                                     {'id': 'claude', 'name': 'Claude', 'app': 'claude', 'roles': ['z'], 'manual': True}]}
+        self.mb.save_project('p', 'P', str(self.home), self.settings)
+        self.started = []
+        self.patches = [mock.patch.object(worker, 'start', self.started.append),
+                        mock.patch.object(server.projects, 'root_of', return_value=('p', 'P', str(self.home)))]
+        for p in self.patches:
+            p.start()
+
+    def tearDown(self):
+        for p in self.patches:
+            p.stop()
+        self.mb.close()
+
+    def test_parse_names_and_ids(self):
+        from teamchat import members
+        found = members.mentions('hey @3d designer and @claude-montage, mail me@x.com', self.settings)
+        self.assertEqual(found, ['claude-3d-designer', 'claude-montage'])
+        self.assertEqual(members.mentions('@Claude', self.settings), ['claude'])
+        self.assertEqual(members.mentions('@Claudette', self.settings), [])
+
+    def test_busy_member_gets_note_free_one_gets_request(self):
+        busy = self.mb.ask('human', 'claude-montage', 'cut shot 3', cwd=str(self.home))
+        self.mb.set_status(busy['id'], 'working', 'claude-montage')
+        out = self.server.mention_members(self.mb, 'p', 'general', '@Montage make it 6 s. @3D Designer add rails')
+        self.assertEqual([(o['id'], o['how']) for o in out], [('claude-montage', 'live'), ('claude-3d-designer', 'new')])
+        self.assertEqual([b for _, b in self.mb.take_nudges(busy['id'])], ['@Montage make it 6 s. @3D Designer add rails'])
+        self.assertEqual(self.started, [out[1]['request']])
+        manual = self.server.mention_members(self.mb, 'p', 'general', '@Claude check this')
+        self.assertEqual(manual[0]['how'], 'inbox')
+        self.assertEqual(len(self.started), 1)  # manual members are not started
+
+    def test_late_note_becomes_follow_up(self):
+        req = self.mb.ask('human', 'claude-montage', 'cut shot 3', cwd=str(self.home))
+        self.mb.nudge(req['id'], 'also fix the seam')
+        new = self.worker._carry_notes(self.mb, self.mb.request(req['id']), {'id': 'claude-montage'}, self.settings)
+        self.assertIn('also fix the seam', new['body'])
+        self.assertEqual(self.started, [new['id']])
+        self.assertEqual(self.mb.take_nudges(req['id']), [])
+
+if __name__ == '__main__':
+    unittest.main()
