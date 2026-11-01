@@ -518,3 +518,34 @@ details.older[open] summary::before { content: '▾ '; }
 .switch-card[hidden] { display: none; }
 .m-note { margin: 0; font-size: 12.5px; color: var(--muted); background: var(--soft); border-radius: 10px; padding: 9px 12px; }
 @media (max-width: 760px) { .role-cards { grid-template-columns: 1fr 1fr; } .m-two, .member-dialog .agent-tiles { grid-template-columns: 1fr 1fr; } }
+
+/* ---------- control bar ---------- */
+.app { grid-template-rows: auto minmax(0, 1fr); }
+.topbar { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: stretch; min-height: 58px;
+  background: var(--rail); border-bottom: 1px solid var(--line); }
+.tb-brand { display: flex; align-items: center; gap: 10px; padding: 0 16px; min-width: 0; }
+.tb-brand .brand-mark { width: 30px; height: 30px; }
+.tb-brand .brand-name { font-size: 15px; }
+.tb-brand .brand-sub { font-size: 11px; }
+.tb-view { display: flex; align-items: center; gap: 14px; padding: 0 22px; min-width: 0; background: var(--bg);
+  border-left: 1px solid var(--line); border-right: 1px solid var(--line); }
+.tb-titles { min-width: 0; flex: 1; }
+.tb-titles h1 { font-size: 16px; margin: 0; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tb-titles .subtitle { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; gap: 6px; align-items: center; }
+.tb-project { display: flex; align-items: center; gap: 10px; padding: 0 14px; min-width: 0; background: var(--side); }
+.tb-project-text { flex: 1; min-width: 0; }
+.tb-project .panel-title { font-size: 14px; gap: 7px; white-space: nowrap; overflow: hidden; }
+.tb-project .panel-title img { width: 18px; height: 18px; flex: none; }
+.tb-project .panel-title span { overflow: hidden; text-overflow: ellipsis; }
+.tb-project .panel-path { margin-top: 1px; overflow-wrap: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tb-project .panel-actions { display: flex; gap: 6px; margin: 0; flex: none; }
+.tb-btn { width: 34px; height: 34px; border: 1px solid var(--line); background: var(--panel); border-radius: 10px; display: grid; place-items: center; }
+.tb-btn img { width: 17px; height: 17px; }
+.tb-btn:hover { border-color: var(--accent); }
+.rail { padding-top: 12px; }
+.panel-head:has(.team-card[hidden]) { display: none; }
+@media (max-width: 860px) {
+  .topbar { grid-template-columns: 1fr; }
+  .tb-brand, .tb-project { display: none; }
+  .tb-view { border: 0; padding: 0 16px; }
+}

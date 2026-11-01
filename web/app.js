@@ -60,6 +60,9 @@ function avatar(id, small, hue) {
   if (m.avatar) return el('img', { class: 'avatar' + (small ? ' sm' : ''), src: m.avatar, alt: m.name, title: m.name, style: tint(hue ?? m.hue) });
   return el('div', { class: 'avatar' + (small ? ' sm' : ''), style: `background:${m.color}`, title: m.name }, m.name[0]);
 }
+function iconBtn(icon, title, onclick) {  // a square button with just an icon; the title says what it does
+  return el('button', { class: 'icon-btn tb-btn', type: 'button', title, 'aria-label': title, onclick }, el('img', { src: ICON(icon), alt: '' }));
+}
 function btn(icon, label, onclick, extra = '') {
   return el('button', { class: 'btn ' + extra, type: 'button', onclick }, icon ? el('img', { src: ICON(icon), alt: '' }) : null, label);
 }
@@ -239,11 +242,13 @@ $('#nav-all').onclick = () => selectProject(null);
 // ---------- column 2: project panel ----------
 function renderPanel() {
   const p = projectOf(state.project);
-  $('#p-title').replaceChildren(el('img', { src: ICON(p ? 'folder' : 'team-room'), alt: '', style: 'width:20px;height:20px' }), p ? p.name : 'All activity');
-  $('#p-path').textContent = p ? (p.root || 'Chats without a single project folder') : 'Every project, newest first';
+  $('#p-title').replaceChildren(el('img', { src: ICON(p ? 'folder' : 'team-room'), alt: '' }), el('span', {}, p ? p.name : 'All projects'));
+  $('#p-title').title = p ? p.name : '';
+  $('#p-path').textContent = p ? (p.root || 'Chats without a single project folder') : 'Everything, newest first';
+  $('#p-path').title = p && p.root ? p.root : '';
   $('#p-actions').replaceChildren(...(p ? [
-    p.root ? btn('folder', 'Open folder', () => act({ action: 'folder', path: p.root })) : null,
-    btn('retry', 'Start fresh', () => startFresh(p)),
+    p.root ? iconBtn('folder', 'Open the project folder', () => act({ action: 'folder', path: p.root })) : null,
+    iconBtn('retry', 'Start fresh: new agent chats, or clear this project’s history', () => startFresh(p)),
   ].filter(Boolean) : []));
   renderTeamCard(p);
   $('#p-room').classList.toggle('active', state.view.type === 'room');

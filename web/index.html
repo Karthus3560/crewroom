@@ -11,12 +11,24 @@
 </head>
 <body>
 <div class="app">
-  <!-- 1. Projects rail -->
-  <aside class="rail">
-    <div class="brand">
+  <!-- 0. Control bar: brand · what you're looking at and its actions · the project and its folder -->
+  <header class="topbar">
+    <div class="tb-brand">
       <img class="brand-mark" src="assets/logo-mark.png" alt="">
       <div><div class="brand-name">Crewroom</div><div class="brand-sub">Your AI team, together</div></div>
     </div>
+    <div class="tb-view">
+      <div class="tb-titles"><h1 id="title">All activity</h1><div class="subtitle" id="subtitle"></div></div>
+      <div class="header-actions" id="header-actions"></div>
+    </div>
+    <div class="tb-project">
+      <div class="tb-project-text"><div class="panel-title" id="p-title">All activity</div><div class="panel-path" id="p-path"></div></div>
+      <div class="panel-actions" id="p-actions"></div>
+    </div>
+  </header>
+
+  <!-- 1. Projects rail -->
+  <aside class="rail">
     <button class="rail-item" id="nav-all" title="Everything, across all projects">
       <img src="assets/icon-team-room.png" alt=""><span class="rail-name">All activity</span><span class="badge" id="all-open"></span>
     </button>
@@ -28,13 +40,6 @@
 
   <!-- 2. Conversation -->
   <main class="main">
-    <header class="header">
-      <div class="header-text">
-        <h1 id="title">All activity</h1>
-        <div class="subtitle" id="subtitle"></div>
-      </div>
-      <div class="header-actions" id="header-actions"></div>
-    </header>
     <div class="banner" id="banner" hidden></div>
     <div class="feed" id="feed"><div class="feed-inner" id="feed-inner"></div></div>
 
@@ -63,9 +68,6 @@
   <!-- 3. Project panel (right) -->
   <aside class="panel">
     <div class="panel-head">
-      <div class="panel-title" id="p-title">All activity</div>
-      <div class="panel-path" id="p-path"></div>
-      <div class="panel-actions" id="p-actions"></div>
       <div class="team-card" id="p-team" hidden></div>
     </div>
     <div class="panel-scroll">
