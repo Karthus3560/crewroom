@@ -224,16 +224,31 @@ function renderProjects() {
   }) : [el('div', { class: 'empty' }, 'Loading projects…')]));
 }
 function renderTeam() {
-  const busy = new Set([...state.requests.values()].filter((r) => r.status === 'working').map((r) => r.recipient));
-  // Anyone with open work here shows too, even if they aren't on the project's saved team (e.g. plain "cursor").
-  const active = [...state.requests.values()].filter((r) => OPEN.includes(r.status) && (!state.project || r.project === state.project))
-    .map((r) => r.recipient).filter((id) => appOf(id) !== 'human');
-  const ids = ['human', ...new Set([...teamOf(state.project), ...active])];
-  $('#team').replaceChildren(...ids.map((id) => [id, member(id)]).map(([id, m]) => el('div', { class: 'member', title: m.role },
-    avatar(id, true), el('b', {}, m.name),
-    id === 'human' ? null : el('span', { class: 'presence' + (busy.has(id) ? ' busy' : '') }, busy.has(id) ? 'working' : 'free'))));
+  // One team panel: a card per member, coloured by what it's doing. Click a card to ask that member; click it again
+  // (or Team) to talk to the whole team.
+  const reqs = [...state.requests.values()].filter((r) => !state.project || r.project === state.project);
+  const active = reqs.filter((r) => OPEN.includes(r.status)).map((r) => r.recipient).filter((id) => appOf(id) !== 'human');
+  const ids = [...new Set([...teamOf(state.project), ...active])];
+  const manual = state.manual?.[state.project] || [];
+  const stateOf = (id) => reqs.some((r) => r.recipient === id && r.status === 'working') ? ['busy', 'working']
+    : manual.includes(id) ? ['manual', 'own app']
+    : reqs.some((r) => r.recipient === id && ['queued', 'asked'].includes(r.status)) ? ['waiting', 'waiting'] : ['free', 'free'];
+  const card = (id, label, pic, st, title) => el('button', { type: 'button', class: `member-card ${st[0]} ${appOf(id)}` + (state.to === id ? ' on' : ''),
+    title, onclick: () => pickRecipient(id) }, pic, el('span', { class: 'mc-name' }, label), el('span', { class: 'mc-state' }, st[1]));
+  $('#team').replaceChildren(
+    card('team', 'Team', el('img', { class: 'avatar sm', src: ICON('team-room'), alt: '' }), ['team', state.view.type === 'channel' ? '#' + CHANNEL[state.view.channel] : 'room'],
+      'Talk to the whole team'),
+    ...ids.map((id) => card(id, member(id).name, avatar(id, true), stateOf(id), `${member(id).name} · ${member(id).role || ''}`)));
+}
+function pickRecipient(id) {
+  if (state.view.type === 'request') show({ type: 'room' });  // asking someone new starts from the project, not a request
+  state.to = state.to === id ? 'team' : id;
+  updateComposer();
+  renderTeam();
+  text.focus();
 }
 function selectProject(key) {
+  state.askCwd = null;
   state.project = key; save('project', key); renderTeam();
   show({ type: 'room' });
 }
@@ -443,35 +458,55 @@ function show(view) {
 }
 
 // ---------- composer ----------
+// One box. Talking to the team: a channel message. Asking a member (picked on a team card): the first line becomes the
+// request's title and the rest its details; it starts right away in the project folder (the folder chip changes it).
 const text = $('#text');
 function renderTo() {
   const ids = teamOf(state.project);
-  if (state.to !== 'team' && !ids.includes(state.to)) state.to = 'team';
-  $('#to').replaceChildren(el('button', { type: 'button', 'data-to': 'team', class: state.to === 'team' ? 'on' : '' },
-    state.view.type === 'channel' ? `# ${CHANNEL[state.view.channel]}` : 'Team'),
-  ...ids.map((id) => el('button', { type: 'button', 'data-to': id, class: state.to === id ? 'on' : '', title: member(id).role || '' },
-    dotFor(id), 'Ask ' + member(id).name)));
+  if (state.to !== 'team' && !ids.includes(state.to) && !(state.requests && [...state.requests.values()].some((r) => r.recipient === state.to)))
+    state.to = 'team';
+}
+function askFolder() {
+  const p = projectOf(state.project);
+  return state.askCwd || (p && p.root) || '';
 }
 function updateComposer() {
   renderTo();
   const inRequest = state.view.type === 'request';
   const asking = !inRequest && state.to !== 'team';
-  $('#composer-top').hidden = inRequest;
-  $('#ask-fields').hidden = !asking;
-  $('#run-wrap').hidden = !asking;
-  document.querySelectorAll('#to button').forEach((b) => b.classList.toggle('on', b.dataset.to === state.to));
   const p = projectOf(state.project);
-  if (asking && !$('#req-cwd').dataset.touched) $('#req-cwd').value = (p && p.root) || '';
-  text.placeholder = inRequest ? 'Reply on this request…' : asking ? `Details for ${member(state.to).name} (optional — Markdown works)`
-    : `Message ${state.view.type === 'channel' ? '#' + CHANNEL[state.view.channel] : 'the team'}${p ? ' · ' + p.name : ''}…  (Enter to send · Shift+Enter for a new line)`;
-  $('#hint').textContent = asking ? `${member(state.to).name} works on this in its ongoing ${p ? p.name + ' ' : ''}chat and posts the result here.` : '';
+  const where = state.view.type === 'channel' ? '#' + CHANNEL[state.view.channel] : 'the team room';
+  if (inRequest) {
+    const r = state.requests.get(state.view.id);
+    $('#composer-to').replaceChildren(el('span', { class: 'to-label' }, 'Reply to'), r ? el('span', { class: 'to-chip' }, avatar(r.recipient, true), member(r.recipient).name) : null,
+      el('span', { class: 'muted' }, 'on this request'));
+  } else if (asking) {
+    $('#composer-to').replaceChildren(el('span', { class: 'to-label' }, 'Ask'),
+      el('span', { class: 'to-chip ' + appOf(state.to) }, avatar(state.to, true), member(state.to).name,
+        el('button', { type: 'button', class: 'to-x', title: 'Back to the team room', onclick: () => pickRecipient(state.to) }, '✕')),
+      el('span', { class: 'muted' }, 'first line = title · it starts right away'));
+  } else {
+    $('#composer-to').replaceChildren(el('span', { class: 'to-label' }, 'To'), el('span', { class: 'to-chip team' }, where + (p ? ' · ' + p.name : '')),
+      el('span', { class: 'muted' }, 'pick a teammate on the left to ask them for work'));
+  }
+  const folder = askFolder();
+  $('#req-folder').hidden = !asking;
+  $('#req-folder-name').textContent = folder ? folder.replace(/[\\/]+$/, '').split(/[\\/]/).pop() : 'Choose a work folder';
+  $('#req-folder').title = folder ? `Work folder: ${folder} — click to change` : 'Choose the work folder';
+  text.placeholder = inRequest ? 'Reply on this request…' : asking ? `What should ${member(state.to).name} do?  The first line is the title; add details below (Shift+Enter)`
+    : `Message ${where}${p ? ' · ' + p.name : ''}…  (Enter to send · Shift+Enter for a new line)`;
+  $('#hint').textContent = asking ? (((state.manual?.[state.project]) || []).includes(state.to) ? `${member(state.to).name} works in its own app: this waits in its inbox.`
+    : `${member(state.to).name} works on it in its ongoing ${p ? p.name + ' ' : ''}chat and posts the result here.`) : '';
 }
-$('#to').addEventListener('click', (e) => {
-  const b = e.target.closest('button');
-  if (!b) return;
-  state.to = b.dataset.to; updateComposer(); (state.to === 'team' ? text : $('#req-title')).focus();
-});
-$('#req-cwd').addEventListener('input', () => { $('#req-cwd').dataset.touched = '1'; });
+$('#req-folder').onclick = async () => {
+  const btn = $('#req-folder');
+  btn.disabled = true;
+  toast('Opening your folder picker…');
+  try {
+    const r = await api('pick-folder', { start: askFolder(), title: `Which folder should ${member(state.to).name} work in?` });
+    if (r.path) { state.askCwd = r.path; updateComposer(); }
+  } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+};
 text.addEventListener('input', () => { text.style.height = 'auto'; text.style.height = Math.min(text.scrollHeight, 220) + 'px'; });
 text.addEventListener('keydown', (e) => {
   if (mentionKey(e)) return;
@@ -524,7 +559,6 @@ function mentionKey(e) {
 text.addEventListener('input', showMentions);
 text.addEventListener('click', showMentions);
 text.addEventListener('blur', () => setTimeout(() => { pop.hidden = true; }, 120));
-$('#req-title').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('#composer').requestSubmit(); } });
 $('#composer').addEventListener('submit', async (e) => {
   e.preventDefault();
   askNotify();
@@ -549,11 +583,10 @@ $('#composer').addEventListener('submit', async (e) => {
           : m.how === 'inbox' ? `${n} works in its own app: waiting in its inbox` : `${n} is on it: new request started`);
       }
     } else {
-      const title = $('#req-title').value.trim() || body.split('\n')[0].slice(0, 120);
-      if (!title) { $('#req-title').focus(); toast('Write what you need first', true); return; }
-      const req = await api('ask', { to: state.to, title, body, run: $('#run').checked, cwd: $('#req-cwd').value.trim() });
-      $('#req-title').value = '';
-      delete $('#req-cwd').dataset.touched;
+      const [first, ...rest] = body.split('\n');
+      const title = first.trim().slice(0, 120);
+      if (!title) { text.focus(); toast('Write what you need first', true); return; }
+      const req = await api('ask', { to: state.to, title, body: rest.join('\n').trim(), run: true, cwd: askFolder() });
       toast(`Sent to ${member(state.to).name}`);
       await poll();
       if (req.project !== undefined) state.project = req.project;

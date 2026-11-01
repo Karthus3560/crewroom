@@ -34,6 +34,7 @@
     </button>
     <div class="rail-title">Projects <button class="new-project" id="new-project" title="Create a project and set up the team">＋ New</button></div>
     <div class="rail-list" id="projects"></div>
+    <div class="team-head">Team <span class="muted">click to ask</span></div>
     <div class="team" id="team"></div>
     <button class="about" id="about" type="button" title="Which Crewroom this is, where it runs from, how to stop or uninstall it"></button>
   </aside>
@@ -44,24 +45,16 @@
     <div class="feed" id="feed"><div class="feed-inner" id="feed-inner"></div></div>
 
     <form class="composer" id="composer" autocomplete="off">
-      <div class="composer-top" id="composer-top">
-        <div class="to-seg" id="to" role="radiogroup" aria-label="Send to">
-          <button type="button" data-to="team" class="on">Team room</button>
-          <button type="button" data-to="claude"><span class="dot claude"></span>Ask Claude</button>
-          <button type="button" data-to="codex"><span class="dot codex"></span>Ask Codex</button>
-        </div>
-        <label class="run" id="run-wrap" hidden title="Start the work now in the background"><input type="checkbox" id="run" checked> Start now</label>
-      </div>
-      <div class="ask-fields" id="ask-fields" hidden>
-        <input id="req-title" placeholder="What should they do?  e.g. Make 6 cozy app icons">
-        <div class="folder-line"><img src="assets/icon-folder.png" alt=""><input id="req-cwd" placeholder="Work folder (full path)"></div>
-      </div>
+      <div class="composer-to" id="composer-to"></div>
       <div class="composer-box">
         <div class="mention-pop" id="mention-pop" role="listbox" hidden></div>
         <textarea id="text" rows="1"></textarea>
         <button class="send" type="submit" title="Send (Enter)"><img src="assets/icon-send.png" alt="Send"></button>
       </div>
-      <div class="composer-hint" id="hint"></div>
+      <div class="composer-foot">
+        <button type="button" class="folder-chip" id="req-folder" hidden><img src="assets/icon-folder.png" alt=""><span id="req-folder-name"></span></button>
+        <span class="composer-hint" id="hint"></span>
+      </div>
     </form>
   </main>
 

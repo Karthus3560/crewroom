@@ -549,3 +549,44 @@ details.older[open] summary::before { content: '▾ '; }
   .tb-brand, .tb-project { display: none; }
   .tb-view { border: 0; padding: 0 16px; }
 }
+
+/* ---------- team cards (sidebar) ---------- */
+.team-head { margin: 10px 9px 4px; font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }
+.team-head .muted { text-transform: none; letter-spacing: 0; font-weight: 500; margin-left: 4px; }
+.team { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; border-top: 0; padding-top: 0; margin-top: 0; }
+.member-card { --c: #3f9d6b; display: flex; flex-direction: column; align-items: center; gap: 2px;
+  text-align: center; padding: 8px 6px 7px; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--c) 45%, var(--line));
+  background: color-mix(in srgb, var(--c) 12%, var(--panel)); color: var(--text); min-width: 0; transition: border-color .15s, background .15s; }
+.member-card .avatar { width: 34px; height: 34px; margin-bottom: 2px; }
+.member-card .mc-name { font-size: 12.5px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.member-card .mc-state { font-size: 10.5px; color: var(--c); font-weight: 650; display: flex; align-items: center; gap: 4px; }
+.member-card .mc-state::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--c); }
+.member-card:hover { border-color: var(--c); }
+.member-card.on { border: 2px solid var(--accent); padding: 7px 5px 6px; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent); }
+.member-card.free { --c: #3f9d6b; }
+.member-card.waiting { --c: #d97706; }
+.member-card.manual { --c: #8a8178; }
+.member-card.team { --c: var(--accent); }
+.member-card.busy.claude { --c: var(--claude); } .member-card.busy.codex { --c: var(--codex); }
+.member-card.busy.cursor { --c: var(--cursor); } .member-card.busy.antigravity { --c: var(--antigravity); }
+.member-card.busy .mc-state::before { animation: pulse 1.4s infinite; }
+.member-card.busy { background: color-mix(in srgb, var(--c) 22%, var(--panel)); }
+
+/* ---------- composer: one box ---------- */
+.composer-to { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; font-size: 12.5px; min-width: 0; flex-wrap: wrap; }
+.to-label { color: var(--muted); font-weight: 650; }
+.to-chip { display: inline-flex; align-items: center; gap: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: 99px;
+  padding: 2px 6px 2px 3px; font-weight: 650; }
+.to-chip.team { padding: 3px 11px; }
+.to-chip .avatar { width: 20px; height: 20px; }
+.to-x { border: 0; background: none; color: var(--muted); padding: 0 3px; font-size: 11px; line-height: 1; border-radius: 50%; }
+.to-x:hover { color: var(--text); }
+.composer-to .muted { font-size: 12px; }
+.composer-foot { display: flex; align-items: center; gap: 10px; margin-top: 6px; min-height: 22px; }
+.folder-chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: var(--panel); border-radius: 99px;
+  padding: 2px 10px 2px 7px; font-size: 12px; font-weight: 600; color: var(--text); max-width: 280px; }
+.folder-chip img { width: 15px; height: 15px; }
+.folder-chip span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.folder-chip:hover { border-color: var(--accent); }
+.folder-chip[hidden] { display: none; }
+.composer-foot .composer-hint { margin: 0; }
