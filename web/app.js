@@ -795,7 +795,7 @@ $('#f-existing').addEventListener('change', () => { if (!$('#f-existing-name').v
 async function browse(input, title, after) {
   const btn = document.activeElement;
   if (btn) btn.disabled = true;
-  toast('The folder picker opened — it may be behind this window');
+  toast('Opening your folder picker…');
   try {
     const r = await api('pick-folder', { start: input.value.trim(), title });
     if (r.path) { input.value = r.path; after && after(r.path); updateWhere(); }

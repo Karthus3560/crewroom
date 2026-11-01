@@ -263,10 +263,24 @@ def pick_folder(start=None, title='Choose a folder'):
     start = str(start or HOME)
     try:
         if WINDOWS:
-            # A hidden top-most owner window brings the dialog in front of the Crewroom window.
+            # Windows won't let a background program bring a window to the front, so the picker would open behind
+            # the Crewroom window. Joining the input of the window in front (AttachThreadInput) lifts that for a moment;
+            # a hidden top-most owner window then keeps the picker on top.
             script = ('Add-Type -AssemblyName System.Windows.Forms; '
-                      '$o = New-Object System.Windows.Forms.Form -Property @{TopMost=$true; ShowInTaskbar=$false; Opacity=0}; '
-                      '$o.Show(); $d = New-Object System.Windows.Forms.FolderBrowserDialog; '
+                      'Add-Type -Namespace CR -Name Fg -MemberDefinition \''
+                      '[DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow(); '
+                      '[DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, IntPtr p); '
+                      '[DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId(); '
+                      '[DllImport("user32.dll")] public static extern bool AttachThreadInput(uint a, uint b, bool on); '
+                      '[DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h); '
+                      '[DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr h);\'; '
+                      '$o = New-Object System.Windows.Forms.Form -Property @{TopMost=$true; ShowInTaskbar=$false; Opacity=0; '
+                      'StartPosition="CenterScreen"; Width=1; Height=1}; $o.Show(); '
+                      '$front = [CR.Fg]::GetWindowThreadProcessId([CR.Fg]::GetForegroundWindow(), [IntPtr]::Zero); '
+                      '$me = [CR.Fg]::GetCurrentThreadId(); [void][CR.Fg]::AttachThreadInput($me, $front, $true); '
+                      '[void][CR.Fg]::BringWindowToTop($o.Handle); [void][CR.Fg]::SetForegroundWindow($o.Handle); $o.Activate(); '
+                      '[void][CR.Fg]::AttachThreadInput($me, $front, $false); '
+                      '$d = New-Object System.Windows.Forms.FolderBrowserDialog; '
                       '$d.Description = $env:CR_TITLE; $d.SelectedPath = $env:CR_START; $d.ShowNewFolderButton = $true; '
                       'if ($d.ShowDialog($o) -eq "OK") { [Console]::OutputEncoding = [Text.Encoding]::UTF8; $d.SelectedPath }')
             out = subprocess.run(['powershell', '-NoProfile', '-STA', '-Command', script], capture_output=True, text=True,
