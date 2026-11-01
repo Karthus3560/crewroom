@@ -17,7 +17,7 @@ import uuid
 from pathlib import Path
 
 from . import paths, projects, system
-from . import agents, dispatch, members as team
+from . import agents, discuss, dispatch, members as team
 from .db import Mailbox
 
 HIDDEN = system.hidden()  # Popen options: no console window on Windows
@@ -480,7 +480,9 @@ def work(rid):
         files = [f for f in changed_files(before, cwd, limit=200) if str(Path(f).resolve()) not in taken][:24]
         shown, notes = dispatch.handle(mb, req, member, settings, final or '', start, project=k)
         mb.set_status(rid, 'done', who, shown or 'Done.', session=session, files=files)
-        if req.get('channel') and shown:  # answer the lead where they wrote
+        posted = req.get('channel') and any(m['sender'] == who and m.get('kind') != 'note'
+                                            for m in mb.channel_messages(k, req['channel'], since=req['created']))
+        if req.get('channel') and shown and not posted:  # answer the lead where they wrote (unless they already did)
             mb.say(who, shown, project=k, channel=req['channel'])
         for note in notes:
             mb.say(who, note, rid=rid, kind='note')
@@ -497,7 +499,25 @@ def work(rid):
         return 1
     finally:
         lock.release()
+        if req.get('discussion'):
+            _next_turn(mb, rid, req['discussion'], who)
         mb.close()
+
+
+def _next_turn(mb, rid, did, who):
+    """A round-table turn ended: hand over to the next member (a failed turn is skipped), or end it if cancelled."""
+    try:
+        status = mb.request(rid)['status']
+        if status == 'cancelled':
+            discuss.stop(mb, did, by=who)
+            return
+        if status == 'failed':
+            d = mb.discussion(did)
+            if d and d['status'] == 'running':
+                mb.say(who, "I couldn't answer this turn; passing to the next teammate.", project=d['project'], channel=d['channel'], kind='note')
+        discuss.advance(mb, did, start)
+    except Exception:
+        pass  # never let the hand-over hide the turn's own result
 
 
 def _delivered(mb, req, nid, ok):

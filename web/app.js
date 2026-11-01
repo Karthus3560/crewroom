@@ -332,6 +332,25 @@ function messageNode(m, inRoom) {
   bubble.append(...attachments(m.files));
   return el('div', { class: 'msg ' + m.sender }, avatar(m.sender), el('div', { class: 'msg-body' }, head, bubble));
 }
+// ---------- round-tables: the team talks a topic through in turns, then the host writes the decision ----------
+const liveTalk = (channel) => (state.discussions || []).find((d) => d.project === state.project && d.channel === channel);
+function roundtableBar(d) {
+  const order = [];
+  for (let r = 0; r < d.rounds; r++) order.push(...d.members);
+  order.push(d.host);
+  const now = order[Math.max(0, d.turn - 1)], deciding = d.turn >= order.length;
+  const round = Math.min(d.rounds, Math.floor(Math.max(0, d.turn - 1) / d.members.length) + 1);
+  const stop = el('button', { type: 'button', class: 'btn small', onclick: async () => {
+    stop.disabled = true;
+    try { await api('discussion/stop', { id: d.id }); toast('Round-table stopped'); poll(); } catch (e) { toast(e.message, true); stop.disabled = false; }
+  } }, 'Stop');
+  return el('div', { class: 'roundtable' },
+    el('div', { class: 'rt-faces' }, ...d.members.map((id) => el('span', { class: 'rt-face' + (id === now ? ' on' : '') }, avatar(id, true)))),
+    el('div', { class: 'rt-text' },
+      el('b', {}, deciding ? `${member(d.host).name} is writing the decision` : `${member(now).name} is answering · round ${round} of ${d.rounds}`),
+      el('small', {}, 'Round-table: everyone sees what the others said. Write here to chime in, or @mention someone to ask them directly.')),
+    stop);
+}
 function foldable(box, fold, label) {
   // In the Activity feed a long brief or report shows its start with a button for the rest; a request's own page
   // shows everything.
@@ -375,7 +394,9 @@ function renderFeed(stick) {
     if (d !== lastDay) { nodes.push(el('div', { class: 'day' }, d)); lastDay = d; }
     nodes.push(messageNode(m, v.type !== 'request'));
   }
-  if (!list.length) nodes.push(el('div', { class: 'empty', style: 'text-align:center;padding:0 0 60px' },
+  const talk = v.type === 'channel' && liveTalk(v.channel);
+  if (talk) nodes.push(roundtableBar(talk));
+  if (!list.length && !talk) nodes.push(el('div', { class: 'empty', style: 'text-align:center;padding:0 0 60px' },
     el('img', { class: 'empty-art', src: 'assets/empty-state.png', alt: '' }),
     v.type === 'channel' ? `No messages in #${CHANNEL[v.channel]} yet. Say hi below — agents can post here with \`team say --channel ${v.channel}\`.`
       : 'Nothing here yet. Ask a teammate for something below, or tell Claude or Codex to use the team-chat skill.'));
@@ -541,10 +562,16 @@ function showMentions() {
     const n = member(id).name.toLowerCase(), s = q.toLowerCase();
     return n.startsWith(s) || id.toLowerCase().startsWith(s) || n.split(' ').some((w) => w.startsWith(s));
   });
+  if (q !== null && ids.length > 1 && ['team', 'everyone'].some((w) => w.startsWith(q.toLowerCase()))) picks.unshift('@team');
   pop.hidden = !picks.length;
   if (!picks.length) return;
   pick = Math.min(pick, picks.length - 1);
   pop.replaceChildren(...picks.map((id, i) => {
+    if (id === '@team') return el('button', { type: 'button', role: 'option', class: i === pick ? 'on' : '', 'aria-selected': i === pick ? 'true' : 'false',
+      onmousedown: (e) => { e.preventDefault(); insertMention(id); } },
+      el('img', { class: 'avatar sm', src: ICON('team-room'), alt: '' }), el('span', { class: 'mp-name' }, 'team'),
+      el('span', { class: 'mp-state' }, state.view.type === 'channel' && state.view.channel === 'discussion'
+        ? 'everyone · they talk it through in turns, then decide' : 'everyone · each replies from their role'));
     const job = busy(id);
     return el('button', { type: 'button', role: 'option', class: i === pick ? 'on' : '', 'aria-selected': i === pick ? 'true' : 'false',
       onmousedown: (e) => { e.preventDefault(); insertMention(id); } },
@@ -554,7 +581,7 @@ function showMentions() {
 }
 function insertMention(id) {
   const caret = text.selectionStart, before = text.value.slice(0, caret).replace(/@[\w-]*(?: [\w-]*)?$/, ''), after = text.value.slice(caret);
-  const tag = '@' + member(id).name + ' ';
+  const tag = (id === '@team' ? '@team' : '@' + member(id).name) + ' ';
   text.value = before + tag + after.replace(/^\s+/, '');
   text.selectionStart = text.selectionEnd = before.length + tag.length;
   pop.hidden = true; picks = [];
@@ -588,9 +615,10 @@ $('#composer').addEventListener('submit', async (e) => {
     } else if (state.to === 'team') {
       if (!body) return;
       const sent = await api('say', { body, project: state.project, channel: state.view.type === 'channel' ? state.view.channel : 'general' });
-      if (sent.routedTo) toast(`${member(sent.routedTo).name} is reading your message`);
+      if (sent.discussion) toast(sent.joined ? 'Added to the round-table: the next speaker sees it' : 'Round-table started: the team talks it through, then decides');
+      else if (sent.routedTo) toast(`${member(sent.routedTo).name} is reading your message`);
       else if (!(sent.mentions || []).length)  // say so, or it looks like the team is ignoring you
-        toast('Posted for everyone to see. No teammate reads the team room by itself: pick one on the left, @mention one, or set a Producer in Edit team.');
+        toast('Posted for everyone to see. Nobody answers the team room in this project: @mention someone, write @team, or change "Who answers the team room" in Edit team.');
       for (const m of sent.mentions || []) {
         const n = member(m.id).name;
         toast(m.how === 'live' ? `${n} is working: reads your note mid-run and adapts`
@@ -634,7 +662,11 @@ async function poll(stick) {
   state.teams = data.teams || {};
   state.manual = data.manual || {};
   state.cleared = data.cleared || {};
-  let changed = false;
+  state.teamRoom = data.teamRoom || {};
+  const talks = JSON.stringify(data.discussions || []);
+  let changed = talks !== state.talksSig;
+  state.talksSig = talks;
+  state.discussions = data.discussions || [];
   for (const r of data.requests) {
     const before = state.requests.get(r.id);
     if (!before || before.status !== r.status || before.worker_session !== r.worker_session) changed = true;
@@ -768,7 +800,10 @@ async function openProjectDialog(opts = {}) {
   $('#f-existing-name').value = opts.existing ? (opts.name || folderName(opts.existing)) : '';
   $('#f-human').value = st.humanRole || setupInfo.humanRole;
   $('#f-fresh').value = st.freshEvery ?? setupInfo.freshEvery;
-  draft.roles = { coordinator: st.coordinator || '', referee: st.referee || '', supervisor: st.supervisor || '' };
+  // A new team gets a Producer by default ('auto' follows the members until the lead picks one, or None).
+  $('#f-teamroom').value = st.teamRoom || '';
+  $('#f-rounds').value = String(st.rounds || 2);
+  draft.roles = { coordinator: edit ? st.coordinator || '' : 'auto', referee: st.referee || '', supervisor: st.supervisor || '' };
   renderTeamRows();
   countShared();
   goStep(edit || opts.existing ? 2 : 1);
@@ -973,13 +1008,23 @@ $('#m-name').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.pre
 $('#m-close').onclick = $('#m-cancel').onclick = () => $('#member-dialog').close();
 
 // ---- step 3: rules and shared skills ----
+function defaultProducer() {  // same rule as the server: the first Claude member, else the first background one
+  const able = draft.members.filter((m) => !m.manual);
+  if (able.length < 2) return '';
+  const m = able.find((x) => x.app === 'claude') || able[0];
+  return memberId(m.app, m.name);
+}
+const roleOf = (k) => (k === 'coordinator' && draft.roles[k] === 'auto' ? defaultProducer() : draft.roles[k]);
 function refreshRoles() {
   const options = draft.members.map((m) => [memberId(m.app, m.name), `${m.name} (${APP_NAMES[m.app] || m.app})`]);
+  const recommended = defaultProducer();
   for (const [key, none] of [['coordinator', 'None — I route work myself'], ['referee', 'None — long chains wait for my OK'],
                              ['supervisor', 'None — Crewroom only restarts and retries']]) {
     const sel = $('#f-' + key);
-    const value = options.some(([id]) => id === draft.roles[key]) ? draft.roles[key] : '';
-    sel.replaceChildren(el('option', { value: '' }, none), ...options.map(([id, label]) => el('option', { value: id, selected: id === value }, label)));
+    const want = roleOf(key);
+    const value = options.some(([id]) => id === want) ? want : '';
+    sel.replaceChildren(el('option', { value: '' }, none), ...options.map(([id, label]) => el('option', { value: id, selected: id === value },
+      key === 'coordinator' && id === recommended ? label + ' · recommended' : label)));
     sel.onchange = () => { draft.roles[key] = sel.value; };
   }
 }
@@ -1017,9 +1062,10 @@ $('#project-form').addEventListener('submit', async (e) => {
   if (draft.step === 3) for (const k of ['coordinator', 'referee', 'supervisor']) draft.roles[k] = $('#f-' + k).value;
   const members = draft.members.map(({ app, name, roles, model, hue, manual, shell }) => ({ app, name: name.trim(), roles, model, hue, manual: !!manual, shell: !!shell }));
   const ids = new Set(members.map((m) => memberId(m.app, m.name)));
-  const pick = (k) => (ids.has(draft.roles[k]) ? draft.roles[k] : '');
+  const pick = (k) => (ids.has(roleOf(k)) ? roleOf(k) : '');
   const team = { members, humanRole: $('#f-human').value.trim(), freshEvery: Number($('#f-fresh').value || 0),
-    coordinator: pick('coordinator'), referee: pick('referee'), supervisor: pick('supervisor') };
+    coordinator: pick('coordinator'), referee: pick('referee'), supervisor: pick('supervisor'),
+    teamRoom: $('#f-teamroom').value, rounds: Number($('#f-rounds').value) };
   const share = { codex: [...draft.shared.codex], claude: [...draft.shared.claude] };
   const body = draft.editing ? { key: draft.editing.key, ...team, share }
     : { ...team, share, linkFiles: $('#f-link').checked,

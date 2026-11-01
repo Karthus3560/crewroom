@@ -12,7 +12,7 @@ from urllib.parse import parse_qs, urlparse
 import re
 import subprocess
 
-from . import __version__, agents, members as team, paths, projects, setup, status, system, transcripts, worker, worklog
+from . import __version__, agents, discuss, members as team, paths, projects, setup, status, system, transcripts, worker, worklog
 from .db import OPEN, Mailbox
 
 WEB = paths.ROOT / 'web'
@@ -198,9 +198,11 @@ class Handler(BaseHTTPRequestHandler):
                              channel=None if rid else channel or 'general')
                 if rid:  # a reply on a running request reaches the agent while it works
                     return self._send(200, {'id': mid, 'note': note_running(mb, mb.request(rid), text)})
-                tagged = mention_members(mb, body.get('project'), channel or 'general', text)
-                routed = None if tagged else route_to_coordinator(mb, body.get('project'), channel or 'general', text)
-                return self._send(200, {'id': mid, 'routedTo': routed, 'mentions': tagged})
+                return self._send(200, {'id': mid} | answer_lead(mb, body.get('project'), channel or 'general', text))
+            if self.path == '/api/discussion/stop':
+                if not discuss.stop(mb, str(body.get('id', ''))):
+                    return self._error(409, 'This round-table is not running')
+                return self._send(200, {'ok': True})
             if self.path == '/api/cancel':
                 req = mb.request(str(body.get('id', '')))
                 if req['status'] not in OPEN:
@@ -273,7 +275,8 @@ class Handler(BaseHTTPRequestHandler):
             teams = {sp['key']: [m['id'] for m in team.team(sp['settings'])] for sp in saved}
             manual = {sp['key']: [m['id'] for m in team.team(sp['settings']) if m.get('manual')] for sp in saved}
             return {'members': members, 'teams': teams, 'manual': manual, 'requests': reqs, 'messages': msgs, 'last': last,
-                    'cleared': mb.cleared()}
+                    'cleared': mb.cleared(), 'discussions': mb.discussions(),
+                    'teamRoom': {sp['key']: discuss.team_room(sp['settings']) for sp in saved}}
         finally:
             mb.close()
 
@@ -434,13 +437,38 @@ def note_running(mb, req, text):
     return 'live' if agents.AGENTS[team.app_of(req['recipient'])].live_notes else 'after'
 
 
-def mention_members(mb, key, channel, text):
-    """@Name in a channel message: a working member gets it as a note mid-run, a free one gets a new request."""
+def answer_lead(mb, key, channel, text):
+    """Who answers a lead's channel message. @Name: those members. @team (or the team room set to Everyone): in
+    #discussion a round-table where members talk it through in turns, elsewhere everyone replies at once. Otherwise
+    the Producer, or nobody if the team room is set to Nobody. During a round-table, untagged messages join it."""
     p = mb.project(key) if key else None
     if not p:
-        return []
+        return {}
+    tagged = team.mentions(text, p['settings'])
+    live = discuss.running(mb, key, channel)
+    if live and not tagged:
+        return {'discussion': live['id'], 'joined': True}
+    room = discuss.team_room(p['settings'])
+    everyone = team.mentions_team(text) or (room == 'everyone' and not tagged)
+    if everyone and channel == 'discussion' and not live:
+        try:
+            return {'discussion': discuss.start(mb, p, channel, text, worker.start)}
+        except ValueError as error:
+            mb.say('human', str(error), project=key, channel=channel, kind='note')
+            return {}
+    if everyone:
+        tagged = [m['id'] for m in team.team(p['settings']) if not m.get('manual')]
+    if tagged:
+        return {'mentions': mention_members(mb, p, channel, text, tagged, everyone)}
+    return {'routedTo': route_to_coordinator(mb, key, channel, text) if room == 'producer' else None}
+
+
+def mention_members(mb, p, channel, text, ids, everyone=False):
+    """Tagged members: a working one gets the message as a note mid-run, a free one gets a new request."""
+    key = p['key']
+    context = discuss.channel_context(mb, key, channel, text)
     out = []
-    for mid in team.mentions(text, p['settings']):
+    for mid in ids:
         name = team.find(p['settings'], mid)['name']
         working = [r for r in mb.requests(recipient=mid) if r['status'] == 'working' and r['cwd']
                    and projects.root_of(r['cwd'])[0] == key]
@@ -451,8 +479,10 @@ def mention_members(mb, key, channel, text):
             out.append({'id': mid, 'how': how, 'request': working[0]['id']})
             continue
         first = ' '.join(text.split())[:80]
-        req = mb.ask('human', mid, f'{first}', f'The lead wrote in #{channel} and tagged you:\n\n> ' + text.replace('\n', '\n> '),
-                     cwd=p['root'], channel=channel)
+        intro = 'wrote to the whole team' if everyone else 'tagged you'
+        req = mb.ask('human', mid, f'{first}', f'The lead {intro} in #{channel}:\n\n> ' + text.replace('\n', '\n> ') + context +
+                     ('\n\nEveryone on the team got this too, so answer briefly from your own role and leave the rest to them.'
+                      if everyone else ''), cwd=p['root'], channel=channel)
         if team.is_manual(p['settings'], mid):
             out.append({'id': mid, 'how': 'inbox', 'request': req['id']})
         else:
@@ -469,7 +499,7 @@ def route_to_coordinator(mb, key, channel, text):
         return None
     first = ' '.join(text.split())[:70]
     req = mb.ask('human', coordinator, f'Lead in #{channel}: {first}',
-                 f'The lead wrote in #{channel}:\n\n> ' + text.replace('\n', '\n> ') +
+                 f'The lead wrote in #{channel}:\n\n> ' + text.replace('\n', '\n> ') + discuss.channel_context(mb, key, channel, text) +
                  '\n\nReply to them briefly. If it needs work, refine it into clear orders and dispatch them.',
                  cwd=p['root'], channel=channel)
     worker.start(req['id'])

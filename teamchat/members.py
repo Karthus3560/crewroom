@@ -119,6 +119,12 @@ def mentions(text, settings):
     return sorted(found, key=found.get)
 
 
+def mentions_team(text):
+    """@team, @everyone or @all: the lead wants the whole team."""
+    import re
+    return bool(re.search(r'(?<![\w@])@(team|everyone|all)(?![\w-])', text or '', re.I))
+
+
 def is_manual(settings, mid):
     """A member that works in its own app (e.g. your open Claude Code chat): requests wait in its inbox."""
     return any(m['id'] == mid and m.get('manual') for m in team(settings or {}))

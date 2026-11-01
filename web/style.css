@@ -632,3 +632,16 @@ details.older[open] summary::before { content: '▾ '; }
 .fold-btn { margin-top: 6px; border: 1px solid var(--line); background: var(--soft); color: var(--text); border-radius: 99px; padding: 2px 12px;
   font-size: 12px; font-weight: 600; }
 .fold-btn:hover { border-color: var(--accent); }
+
+/* ---------- round-table ---------- */
+.roundtable { position: sticky; bottom: 0; display: flex; align-items: center; gap: 12px; margin: 14px 0 4px; padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); border-radius: 14px;
+  background: color-mix(in srgb, var(--accent) 9%, var(--panel)); box-shadow: 0 6px 20px rgb(0 0 0 / .08); }
+.rt-faces { display: flex; flex: none; }
+.rt-face { width: 28px; height: 28px; border-radius: 50%; margin-left: -6px; box-shadow: 0 0 0 2px var(--panel); opacity: .55; display: grid; place-items: center; }
+.rt-face:first-child { margin-left: 0; }
+.rt-face.on { opacity: 1; box-shadow: 0 0 0 2px var(--accent); animation: pulse 1.4s infinite; z-index: 1; }
+.rt-face .avatar { width: 26px; height: 26px; }
+.rt-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.rt-text b { font-size: 13px; }
+.rt-text small { font-size: 11.5px; color: var(--muted); }

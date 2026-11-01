@@ -167,15 +167,28 @@ def configure(root, name, body, new_folder):
     settings = {'members': team.clean(given, None),
                 'humanRole': str(body.get('humanRole') or team.DEFAULT_HUMAN_ROLE)[:300],
                 'freshEvery': max(0, min(50, int(body.get('freshEvery', team.DEFAULT_FRESH_EVERY) or 0)))}
-    coordinator = str(body.get('coordinator') or '')
+    # Every team gets a Producer unless the lead picks "None": callers that don't say get the default one.
+    coordinator = str(body['coordinator'] or '') if 'coordinator' in body else default_producer(settings['members'])
     settings['coordinator'] = coordinator if coordinator in {m['id'] for m in settings['members']} else ''
     referee = str(body.get('referee') or '')
     settings['referee'] = referee if referee in {m['id'] for m in settings['members']} else ''
     supervisor = str(body.get('supervisor') or '')
     settings['supervisor'] = supervisor if supervisor in {m['id'] for m in settings['members']} else ''
+    room = body.get('teamRoom')
+    settings['teamRoom'] = room if room in ('producer', 'everyone', 'nobody') else ''  # '' = the Producer if there is one
+    settings['rounds'] = max(1, min(3, int(body.get('rounds') or 2)))
     settings['shared'] = share_skills(root, body.get('share') or {})
     write_team_files(root, name, settings, settings['shared'], link=new_folder or body.get('linkFiles', True))
     return settings
+
+
+def default_producer(members):
+    """Who reads the lead's messages and routes the work, by default: the first Claude member, else the first one that
+    works in the background. A team of one needs no Producer."""
+    able = [m for m in members if not m.get('manual')]
+    if len(able) < 2:
+        return ''
+    return next((m['id'] for m in able if m['app'] == 'claude'), able[0]['id'])
 
 
 def share_skills(root, share):

@@ -473,11 +473,11 @@ class MentionTests(unittest.TestCase):
     def test_busy_member_gets_note_free_one_gets_request(self):
         busy = self.mb.ask('human', 'claude-montage', 'cut shot 3', cwd=str(self.home))
         self.mb.set_status(busy['id'], 'working', 'claude-montage')
-        out = self.server.mention_members(self.mb, 'p', 'general', '@Montage make it 6 s. @3D Designer add rails')
+        out = self.server.answer_lead(self.mb, 'p', 'general', '@Montage make it 6 s. @3D Designer add rails')['mentions']
         self.assertEqual([(o['id'], o['how']) for o in out], [('claude-montage', 'live'), ('claude-3d-designer', 'new')])
         self.assertEqual([b for _, b in self.mb.take_nudges(busy['id'])], ['@Montage make it 6 s. @3D Designer add rails'])
         self.assertEqual(self.started, [out[1]['request']])
-        manual = self.server.mention_members(self.mb, 'p', 'general', '@Claude check this')
+        manual = self.server.answer_lead(self.mb, 'p', 'general', '@Claude check this')['mentions']
         self.assertEqual(manual[0]['how'], 'inbox')
         self.assertEqual(len(self.started), 1)  # manual members are not started
 
@@ -488,6 +488,76 @@ class MentionTests(unittest.TestCase):
         self.assertIn('also fix the seam', new['body'])
         self.assertEqual(self.started, [new['id']])
         self.assertEqual(self.mb.take_nudges(req['id']), [])
+
+    def say(self, who, text, channel='discussion'):
+        self.mb.say(who, text, project='p', channel=channel)
+
+    def test_team_tag_outside_discussion_asks_everyone_who_can_answer(self):
+        from teamchat import members
+        self.assertTrue(members.mentions_team('what do you think @team?'))
+        self.assertFalse(members.mentions_team('mail team@x.com or @teamwork'))
+        self.say('human', 'logo is blue now', 'general')
+        out = self.server.answer_lead(self.mb, 'p', 'general', '@everyone ready to ship?')['mentions']
+        self.assertEqual([o['id'] for o in out], ['claude-montage', 'claude-3d-designer'])  # the manual one sits out
+        body = self.mb.request(out[0]['request'])['body']
+        self.assertIn('whole team', body)
+        self.assertIn('logo is blue now', body)  # sees what the channel was talking about
+
+    def test_team_room_setting(self):
+        from teamchat import discuss
+        self.assertEqual(discuss.team_room({}), 'nobody')
+        self.assertEqual(discuss.team_room({'coordinator': 'x'}), 'producer')
+        self.assertEqual(discuss.team_room({'coordinator': 'x', 'teamRoom': 'nobody'}), 'nobody')
+        self.mb.save_project('p', 'P', str(self.home), self.settings | {'coordinator': 'claude-montage'})
+        self.assertEqual(self.server.answer_lead(self.mb, 'p', 'general', 'hello')['routedTo'], 'claude-montage')
+        self.mb.save_project('p', 'P', str(self.home), self.settings | {'coordinator': 'claude-montage', 'teamRoom': 'nobody'})
+        self.assertIsNone(self.server.answer_lead(self.mb, 'p', 'general', 'hello')['routedTo'])
+        self.assertEqual(self.started, [self.mb.requests('claude-montage')[0]['id']])
+
+    def test_round_table_takes_turns_then_decides(self):
+        from teamchat import discuss
+        self.mb.save_project('p', 'P', str(self.home), self.settings | {'rounds': 1})
+        self.say('human', '@team should we cut the intro?')
+        got = self.server.answer_lead(self.mb, 'p', 'discussion', '@team should we cut the intro?')
+        did = got['discussion']
+        first = self.mb.request(self.started[-1])
+        self.assertEqual((first['recipient'], first['discussion'], first['channel']), ('claude-montage', did, 'discussion'))
+        self.assertIn('go first', first['body'])
+        self.mb.set_status(first['id'], 'done', 'claude-montage', 'Cut it.')
+        self.say('claude-montage', 'Cut it, it drags.')
+        self.say('human', 'keep the logo though')  # the lead chimes in mid-way
+        self.assertTrue(self.server.answer_lead(self.mb, 'p', 'discussion', 'keep the logo though')['joined'])
+        discuss.advance(self.mb, did, self.started.append)
+        second = self.mb.request(self.started[-1])
+        self.assertEqual(second['recipient'], 'claude-3d-designer')
+        self.assertIn('Cut it, it drags.', second['body'])
+        self.assertIn('**The lead:** keep the logo though', second['body'])
+        self.assertNotIn('Round-table started', second['body'])
+        self.mb.set_status(second['id'], 'done', 'claude-3d-designer', 'ok')
+        discuss.advance(self.mb, did, self.started.append)
+        decision = self.mb.request(self.started[-1])
+        self.assertEqual(decision['recipient'], 'claude-montage')  # no Producer: the first member hosts
+        self.assertIn('**Decision**', decision['body'])
+        self.mb.set_status(decision['id'], 'done', 'claude-montage', 'ok')
+        self.assertIsNone(discuss.advance(self.mb, did, self.started.append))
+        self.assertEqual(self.mb.discussion(did)['status'], 'done')
+        self.assertIsNone(discuss.running(self.mb, 'p'))
+
+    def test_stopping_a_round_table_cancels_its_turn(self):
+        from teamchat import discuss
+        did = self.server.answer_lead(self.mb, 'p', 'discussion', '@team ideas?')['discussion']
+        turn = self.started[-1]
+        self.assertTrue(discuss.stop(self.mb, did))
+        self.assertEqual(self.mb.request(turn)['status'], 'cancelled')
+        self.assertIsNone(discuss.advance(self.mb, did, self.started.append))
+        self.assertFalse(discuss.stop(self.mb, did))
+
+    def test_every_new_team_gets_a_producer(self):
+        from teamchat import setup
+        two = [{'id': 'codex', 'app': 'codex'}, {'id': 'claude-writer', 'app': 'claude'}]
+        self.assertEqual(setup.default_producer(two), 'claude-writer')
+        self.assertEqual(setup.default_producer([{'id': 'codex', 'app': 'codex'}]), '')  # a team of one needs none
+        self.assertEqual(setup.default_producer(two[:1] + [{'id': 'claude', 'app': 'claude', 'manual': True}]), '')
 
 class AgentTests(unittest.TestCase):
     def setUp(self):

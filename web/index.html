@@ -125,7 +125,17 @@
         <div class="rules">
           <label>Your role<input id="f-human" placeholder="Lead — sets goals and approves the results"></label>
           <label>Fresh chat every … requests <small class="muted">saves tokens · 0 = never</small><input id="f-fresh" type="number" min="0" max="50"></label>
-          <label>Producer <small class="muted">reads your channel messages and sends each order to the member who fits</small><select id="f-coordinator"></select></label>
+          <label>Producer <small class="muted">understands what you want and sends each part to the member who fits · recommended</small><select id="f-coordinator"></select></label>
+          <label>Who answers the team room <small class="muted">when you write in a channel without @mentioning anyone</small>
+            <select id="f-teamroom">
+              <option value="">The Producer (nobody if there's no Producer)</option>
+              <option value="producer">The Producer</option>
+              <option value="everyone">Everyone · a round-table in #Discussion</option>
+              <option value="nobody">Nobody · it's just a note</option>
+            </select></label>
+          <label>Round-table length <small class="muted">how many times each member speaks before the decision · @team in #Discussion</small>
+            <select id="f-rounds"><option value="1">1 round · quick</option><option value="2">2 rounds · they can answer each other</option>
+              <option value="3">3 rounds · a longer debate</option></select></label>
           <label>Referee <small class="muted">steps in when a hand-off chain runs long</small><select id="f-referee"></select></label>
           <label>Supervisor <small class="muted">fixes orders that fail or get stuck</small><select id="f-supervisor"></select></label>
           <div class="rule-skills"><b>Shared skills</b> <span class="muted" id="share-count">none</span>

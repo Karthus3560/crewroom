@@ -37,6 +37,10 @@ create table if not exists projects(
 create table if not exists project_marks(key text primary key, cleared_at text);
 create table if not exists watch(issue text primary key, at text not null);
 create table if not exists nudges(id text primary key, rid text not null, body text not null, status text not null, created text not null);
+create table if not exists discussions(
+  id text primary key, project text not null, channel text not null, topic text not null, members text not null,
+  rounds integer not null, turn integer not null default 0, host text not null, status text not null,
+  started text not null, updated text not null);
 create table if not exists agent_sessions(
   project text not null, provider text not null, session text not null, updated text not null,
   primary key(project, provider));
@@ -74,6 +78,8 @@ class Mailbox:
                 self.db.execute('alter table requests add column refereed integer not null default 0')
             if 'turns' not in {r[1] for r in self.db.execute('pragma table_info(agent_sessions)')}:
                 self.db.execute('alter table agent_sessions add column turns integer not null default 0')
+            if 'discussion' not in rcols:  # v1.3: a request that is one turn of a round-table discussion
+                self.db.execute('alter table requests add column discussion text')
 
     @contextlib.contextmanager
     def tx(self):
@@ -93,7 +99,7 @@ class Mailbox:
         from .members import display
         return set(display(self.saved_projects()))
 
-    def ask(self, sender, recipient, title, body='', cwd=None, session=None, files=(), depth=0, channel=None, refereed=0):
+    def ask(self, sender, recipient, title, body='', cwd=None, session=None, files=(), depth=0, channel=None, refereed=0, discussion=None):
         known = self.member_ids()
         if recipient not in known or sender not in known:
             raise ValueError(f'Unknown teammate; use one of {", ".join(sorted(known))}')
@@ -102,9 +108,9 @@ class Mailbox:
         rid = short_id()
         with self.tx():
             self.db.execute('insert into requests(id,sender,recipient,title,body,status,cwd,worker_pid,sender_session,'
-                            'worker_session,created,updated,depth,channel,refereed) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                            'worker_session,created,updated,depth,channel,refereed,discussion) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                 (rid, sender, recipient, title.strip(), body.strip(), 'asked', cwd, None, session, None, now(), now(),
-                 depth, channel, int(bool(refereed))))
+                 depth, channel, int(bool(refereed)), discussion))
             self._message(rid, sender, 'request', body or title, session, files)
         return self.request(rid)
 
@@ -186,6 +192,29 @@ class Mailbox:
             self.db.execute('insert into attachments values(?,?,?,?,?,?)', (short_id(), mid, str(p), p.name,
                 mimetypes.guess_type(p.name)[0] or 'application/octet-stream', p.stat().st_size))
         return mid
+
+    def channel_messages(self, project, channel, since=None, limit=14):
+        """The latest messages posted in a project channel (not request threads), oldest first."""
+        sql, args = 'select sender, body, kind, created from messages where project=? and channel=? and request_id is null', [project, channel]
+        if since:
+            sql += ' and created>=?'
+            args.append(since)
+        return [dict(r) for r in self.db.execute(sql + ' order by seq desc limit ?', args + [limit])][::-1]
+
+    # --- round-table discussions ------------------------------------------------
+    def discussion(self, did):
+        row = self.db.execute('select * from discussions where id=?', (did,)).fetchone()
+        return dict(row) | {'members': json.loads(row['members'])} if row else None
+
+    def discussions(self, running_only=True):
+        sql = 'select * from discussions' + (" where status='running'" if running_only else '')
+        return [dict(r) | {'members': json.loads(r['members'])} for r in self.db.execute(sql + ' order by started desc')]
+
+    def save_discussion(self, d):
+        with self.tx():
+            self.db.execute('insert or replace into discussions values(?,?,?,?,?,?,?,?,?,?,?)',
+                            (d['id'], d['project'], d['channel'], d['topic'], json.dumps(d['members']), d['rounds'], d['turn'],
+                             d['host'], d['status'], d['started'], now()))
 
     def messages(self, after=0, rid=None, limit=500):
         sql, args = 'select * from messages where seq>?', [after]
