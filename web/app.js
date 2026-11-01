@@ -1,5 +1,5 @@
 'use strict';
-// Crewroom window. Column 1: projects. Column 2: the project's room, requests and agent chats. Column 3: conversation.
+// Crewroom window. Column 1: projects. Column 2: the project's room, channels and requests. Column 3: conversation.
 
 const $ = (sel) => document.querySelector(sel);
 const ICON = (name) => `assets/icon-${name}.png`;
@@ -236,7 +236,6 @@ function renderPanel() {
   $('#p-path').textContent = p ? (p.root || 'Chats without a single project folder') : 'Every project, newest first';
   $('#p-actions').replaceChildren(...(p ? [
     p.root ? btn('folder', 'Open folder', () => act({ action: 'folder', path: p.root })) : null,
-    p.root ? btn('open-app', 'Open in Codex', () => act({ action: 'codex-app', path: p.root })) : null,
     btn('retry', 'Start fresh', () => startFresh(p)),
   ].filter(Boolean) : []));
   renderTeamCard(p);
@@ -252,46 +251,14 @@ function renderPanel() {
     class: 'row' + (state.view.type === 'request' && state.view.id === r.id ? ' active' : ''), onclick: () => show({ type: 'request', id: r.id }) },
   dotFor(r.recipient), el('span', { class: 'row-title', title: r.title }, r.title), pill(r.status),
   el('span', { class: 'row-meta' }, `${member(r.sender).name} → ${member(r.recipient).name}`, state.project ? '' : ` · ${(projectOf(r.project) || {}).name || ''}`)))
-    : [el('div', { class: 'empty' }, state.reqFilter === 'open' ? 'No open requests. Ask Claude or Codex below.' : 'No requests yet.')]));
+    : [el('div', { class: 'empty' }, state.reqFilter === 'open' ? 'No open requests. Ask a teammate below.' : 'No requests yet.')]));
 
-  // Agent chats, grouped
-  const chats = state.sessions.filter((s) => !state.project || s.project === state.project);
-  const groups = [];
-  if (state.project) {
-    const team = chats.filter((s) => s.ongoing);
-    if (team.length) groups.push(['Team member chats', team]);
-    for (const prov of ['claude', 'codex']) {
-      const list = chats.filter((s) => s.provider === prov && !s.teamChat);
-      if (list.length) groups.push([`Your ${member(prov).name} chats`, list]);
-    }
-    const older = chats.filter((s) => s.teamChat && !s.ongoing);
-    if (older.length) groups.push(['older', older]);
-  } else {
-    const byProject = new Map();
-    for (const s of chats.slice(0, 40)) {
-      const name = (projectOf(s.project) || {}).name || 'Other';
-      if (!byProject.has(name)) byProject.set(name, []);
-      byProject.get(name).push(s);
-    }
-    groups.push(...byProject);
-  }
-  const chatRow = (s) => el('button', {
-      class: 'row' + (state.view.type === 'chat' && state.view.id === s.id ? ' active' : ''), title: `${s.title}\n${s.cwd || ''}`,
-      onclick: () => show({ type: 'chat', provider: s.provider, id: s.id, title: s.title, cwd: s.cwd }) },
-    el('span', { class: 'dot ' + s.provider }), el('span', { class: 'row-title' }, s.title),
-    s.ongoing ? el('span', { class: 'tag' }, 'TEAM') : el('span'),
-    el('span', { class: 'row-meta' }, `${member(s.provider).name} · ${ago(s.updated)}`));
-  $('#chats').replaceChildren(...(groups.length ? groups.flatMap(([title, list]) => title === 'older'
-    ? [el('details', { class: 'older' }, el('summary', {}, `Earlier one-off request chats (${list.length})`), ...list.map(chatRow))]
-    : [el('div', { class: 'sub-title' }, title), ...list.map(chatRow)])
-    : [el('div', { class: 'empty' }, 'No Claude or Codex chats in this project yet.')]));
 }
 document.querySelectorAll('#req-filter button').forEach((b) => b.addEventListener('click', () => {
   state.reqFilter = b.dataset.f; save('reqFilter', state.reqFilter); renderPanel();
 }));
 $('#p-room').onclick = () => show({ type: 'room' });
 document.querySelectorAll('.row.chan').forEach((b) => { b.onclick = () => show({ type: 'channel', channel: b.dataset.channel }); });
-$('#refresh-chats').onclick = async () => { await loadSessions(true); toast('Chats refreshed'); };
 
 // ---------- column 3: mailbox feed ----------
 function isOld(created, key) {
@@ -376,52 +343,32 @@ function renderFeed(stick) {
   if (stick || atBottom) feed.scrollTop = feed.scrollHeight;
 }
 
-// ---------- column 3: app chat transcripts ----------
-function transcriptNode(msg, provider, asker, base) {
-  // In a team chat the "user" turns are the teammate's requests, not you.
-  const role = msg.role === 'tool' ? provider : msg.role === 'human' && asker ? asker : msg.role;
-  const body = el('div', { class: 'bubble' });
-  let tools = [], images = [];
-  const flush = () => {
-    if (images.length) { body.append(gallery(images.map((src) => ({ src })))); images = []; }
-    if (tools.length) {
-      body.append(el('details', { class: 'tools' }, el('summary', {}, tools.length === 1 ? '1 step' : `${tools.length} steps`), el('ul', {}, tools.map((t) => el('li', {}, t)))));
-      tools = [];
-    }
-  };
-  for (const p of msg.parts) {
-    if (p.type === 'tool') { if (images.length) flush(); tools.push(p.label); }
-    else if (p.type === 'image') images.push(p.src);
-    else { flush(); body.append(markdown(p.text, base)); }
-  }
-  flush();
-  return el('div', { class: 'msg ' + role }, avatar(role), el('div', { class: 'msg-body' },
-    el('div', { class: 'msg-head' }, el('span', { class: 'msg-name' }, member(role).name), el('span', { class: 'msg-time' }, time(msg.time))), body));
-}
-async function loadTranscript(stick) {
+// ---------- column 3: a request's work log ----------
+// What a member said and did while working on a request, read from Crewroom's own log (not from the agent's app).
+const STEP_ICON = { say: 'team-room', tool: 'open-app', image: 'reveal', error: 'cancel' };
+async function loadWorkLog(stick) {
   const v = state.view;
-  if (v.type !== 'chat') return;
+  if (v.type !== 'log') return;
+  const r = state.requests.get(v.id);
+  if (!stick && r && !OPEN.includes(r.status) && state.transcriptSig.startsWith('done:')) return;  // finished: nothing new
   try {
-    const msgs = await api(`transcript?provider=${v.provider}&id=${encodeURIComponent(v.id)}`);
+    const steps = await api(`worklog?id=${encodeURIComponent(v.id)}`);
     if (state.view !== v) return;
-    const sig = msgs.length + ':' + JSON.stringify(msgs.at(-1) || '').length;
+    const sig = (r && !OPEN.includes(r.status) ? 'done:' : '') + steps.length + ':' + JSON.stringify(steps.at(-1) || '').length;
     if (sig === state.transcriptSig && !stick) return;
     state.transcriptSig = sig;
     const feed = $('#feed');
     const atBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 80;
-    const work = [...state.requests.values()].find((r) => r.worker_session === v.id);
-    const nodes = [];
-    let lastDay = '';
-    for (const m of msgs) {
-      const d = m.time ? day(m.time) : '';
-      if (d && d !== lastDay) { nodes.push(el('div', { class: 'day' }, d)); lastDay = d; }
-      nodes.push(transcriptNode(m, v.provider, work && work.sender, v.cwd));
-    }
-    if (!msgs.length) nodes.push(el('div', { class: 'empty' }, 'This chat has no readable messages yet.'));
+    const who = r ? r.recipient : 'human';
+    const nodes = steps.map((s) => s.kind === 'say'
+      ? el('div', { class: 'msg ' + appOf(who) }, avatar(who, true), el('div', { class: 'msg-body' }, el('div', { class: 'bubble' }, markdown(s.text, r && r.cwd))))
+      : el('div', { class: 'log-step ' + s.kind }, el('img', { src: ICON(STEP_ICON[s.kind] || 'open-app'), alt: '' }),
+          el('span', { class: 'log-what' }, s.text), s.detail ? el('code', { class: 'log-detail', title: s.detail }, s.detail) : null));
+    if (!steps.length) nodes.push(el('div', { class: 'empty' }, r && OPEN.includes(r.status) ? 'Nothing logged yet. Steps appear here as the member works.' : 'No work was logged for this request.'));
     $('#feed-inner').replaceChildren(...nodes);
     if (stick || atBottom) feed.scrollTop = feed.scrollHeight;
   } catch (e) {
-    $('#feed-inner').replaceChildren(el('div', { class: 'empty' }, 'Could not read this chat: ' + e.message));
+    $('#feed-inner').replaceChildren(el('div', { class: 'empty' }, 'Could not read the work log: ' + e.message));
   }
 }
 
@@ -446,22 +393,18 @@ function headerFor(view) {
         actions.push(btn('cancel', 'Dismiss', () => cancel(r, true), 'danger'));
       } else if (OPEN.includes(r.status)) actions.push(btn('cancel', 'Cancel', () => cancel(r), 'danger'));
       else actions.push(btn('retry', 'Try again', () => retry(r)));
-      if (r.worker_session) actions.push(btn('app-chats', `${member(r.recipient).name}'s chat`, () =>
-        show({ type: 'chat', provider: appOf(r.recipient), id: r.worker_session, title: `${member(r.recipient).name} · ${r.title}`, cwd: r.cwd })));
+      if (r.status !== 'asked' && r.status !== 'held' && appOf(r.recipient) !== 'human')
+        actions.push(btn('app-chats', 'Work log', () => show({ type: 'log', id: r.id })));
       if (r.cwd) actions.push(btn('folder', 'Open folder', () => act({ action: 'folder', path: r.cwd })));
     }
-  } else {
-    $('#title').textContent = view.title || 'Chat';
-    $('#subtitle').textContent = `${member(view.provider).name} app chat${view.cwd ? ' · ' + view.cwd : ''}`;
-    if (view.provider === 'codex' && [...state.requests.values()].some((r) => r.worker_session === view.id))
-      $('#banner').textContent += ' If the Codex app says “This is open in another app”, wait until the request is done, then press Retry there (not Fork).';
-    if (view.provider === 'claude') actions.push(btn('open-app', 'Open in Claude', () => act({ action: 'claude-desktop', session: view.id })));
-    else if (view.cwd) actions.push(btn('open-app', 'Open in Codex', () => act({ action: 'codex-app', path: projectRoot(view.cwd) || view.cwd })));
-    if (view.cwd) actions.push(btn('folder', 'Open folder', () => act({ action: 'folder', path: view.cwd })));
+  } else if (view.type === 'log') {
+    const r = state.requests.get(view.id);
+    $('#title').textContent = r ? `Work log · ${r.title}` : 'Work log';
+    $('#subtitle').replaceChildren(...(r ? [`What ${member(r.recipient).name} did on this request`, pill(r.status)] : []));
+    actions.push(btn('requests', 'Back to the request', () => show({ type: 'request', id: view.id })));
   }
   $('#header-actions').replaceChildren(...actions);
 }
-function projectRoot(cwd) { const s = state.sessions.find((x) => x.cwd === cwd); return s && (projectOf(s.project) || {}).root; }
 async function release(r) {
   try { await api('release', { id: r.id }); toast(`Sent to ${member(r.recipient).name}`); await poll(); show(state.view); } catch (e) { toast(e.message, true); }
 }
@@ -475,15 +418,15 @@ async function retry(r) {
 function show(view) {
   state.view = view;
   state.transcriptSig = '';
-  const chat = view.type === 'chat';
-  $('#banner').hidden = !chat;
-  if (chat) $('#banner').textContent = `Live from the ${member(view.provider).name} app — read-only here. It updates as the chat goes on.`;
-  $('#composer').hidden = chat;
+  const log = view.type === 'log';
+  $('#banner').hidden = !log;
+  if (log) $('#banner').textContent = 'From Crewroom’s own log of this request: the member’s messages and every step it took. It updates while the member works.';
+  $('#composer').hidden = log;
   headerFor(view);  // may add to the banner
   updateComposer();
   renderProjects();
   renderPanel();
-  if (chat) { $('#feed-inner').replaceChildren(el('div', { class: 'empty' }, 'Loading…')); loadTranscript(true); }
+  if (log) { $('#feed-inner').replaceChildren(el('div', { class: 'empty' }, 'Loading…')); loadWorkLog(true); }
   else renderFeed(true);
 }
 
@@ -1016,5 +959,5 @@ $('#welcome-x').onclick = () => finishWelcome(false);
   show({ type: 'room' });
   setInterval(() => poll().catch(() => {}), 2000);
   setInterval(loadSessions, 15000);
-  setInterval(() => loadTranscript(false), 4000);
+  setInterval(() => loadWorkLog(false), 4000);
 })();

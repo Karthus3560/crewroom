@@ -372,6 +372,12 @@ details.older[open] summary::before { content: '▾ '; }
 .about:hover { color: var(--text); }
 .about.warn { color: var(--accent); font-weight: 600; }
 .about-path { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; word-break: break-all; }
+/* a request's work log */
+.log-step { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); padding: 2px 4px 2px 46px; min-width: 0; }
+.log-step img { width: 14px; height: 14px; opacity: .7; flex: none; }
+.log-step .log-what { flex: none; font-weight: 600; color: var(--text); }
+.log-step .log-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; font-size: 11.5px; }
+.log-step.error .log-what { color: #b42318; }
 .link-btn { border: 0; background: none; color: var(--accent); font-weight: 600; padding: 0; text-decoration: underline; }
 
 .team-faces { display: flex; flex-wrap: wrap; gap: 4px 10px; border: 0; background: none; padding: 2px; text-align: left; width: 100%; }

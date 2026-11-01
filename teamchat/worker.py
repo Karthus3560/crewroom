@@ -184,10 +184,14 @@ class CodexChat:
         if model:
             config['model'] = model
         if thread:
+            try:  # Crewroom archives its work chats after each request, so they stay out of the Codex app's list
+                self.call('thread/unarchive', {'threadId': thread}, timeout=20)
+            except (RuntimeError, TimeoutError):
+                pass  # it wasn't archived (older chats) or the app can't: resume works either way
             try:
                 return self.call('thread/resume', config | {'threadId': thread})['thread']['id'], False
             except RuntimeError:
-                pass  # chat was deleted or archived: start a new one
+                pass  # chat was deleted: start a new one
         tid = self.call('thread/start', config)['thread']['id']
         if name:
             try:
@@ -252,6 +256,7 @@ def _chat_name(project, member):
 def run_codex(mb, req, project, cwd, prompt, log, should_stop):
     member = project['member']
     chat = CodexChat(log)
+    tid = None
     try:
         tid, new = chat.open(project['root'] or cwd, project['session'], _chat_name(project, member), member.get('model'))
         turns = 1 if new else project['turns'] + 1
@@ -260,6 +265,11 @@ def run_codex(mb, req, project, cwd, prompt, log, should_stop):
         text = (FIRST.format(name=member['name'], recap=project['recap']) if new else '') + prompt
         return chat.turn(tid, text, should_stop, lambda: mb.take_nudges(req['id']), lambda nid, ok: _delivered(mb, req, nid, ok)), tid
     finally:
+        if tid:  # a teammate's work chat doesn't belong in your Codex chat list; it keeps its memory while archived
+            try:
+                chat.call('thread/archive', {'threadId': tid}, timeout=20)
+            except (RuntimeError, TimeoutError):
+                pass
         chat.close()
 
 
@@ -289,7 +299,7 @@ def run_claude(mb, req, project, cwd, prompt, log, should_stop):
             *claude_tools(member), '--add-dir', cwd]
     if member.get('model'):
         args += ['--model', member['model']]
-    args += ['--resume', session] if known else ['--session-id', session, '--name', _chat_name(project, member)]
+    args += ['--resume', session] if known else ['--session-id', session]  # unnamed: a work chat, not one of yours
     mb.remember_session(project['key'], member['id'], session, project['turns'] + 1 if known else 1)
     mb.link(req['id'], worker_session=session)
     text = (FIRST.format(name=member['name'], recap=project['recap']) if not known else '') + prompt

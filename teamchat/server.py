@@ -12,7 +12,7 @@ from urllib.parse import parse_qs, urlparse
 import re
 import subprocess
 
-from . import __version__, agents, members as team, paths, projects, setup, status, system, transcripts, worker
+from . import __version__, agents, members as team, paths, projects, setup, status, system, transcripts, worker, worklog
 from .db import OPEN, Mailbox
 
 WEB = paths.ROOT / 'web'
@@ -98,6 +98,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(200, found or {})
                 finally:
                     mb.close()
+            if url.path == '/api/worklog':
+                return self._send(200, worklog.read(q.get('id', '')))
             if url.path == '/api/setup-check':
                 return self._send(200, setup_check())
             if url.path == '/api/ping':
@@ -281,7 +283,8 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def sessions_and_projects():
-    """App chats plus the project list, cached briefly because reading chat files is the slow part."""
+    """The project list (from Crewroom's own projects and requests), cached briefly. Crewroom no longer lists the
+    agents' app chats: a hand-off needs only its request and result, and each request has its own work log."""
     with _lock:
         if time.time() - _sessions_cache['at'] > 5:
             mb = mailbox()
@@ -289,19 +292,9 @@ def sessions_and_projects():
                 saved = mb.saved_projects()
                 projects.set_saved_roots(saved)
                 reqs = mb.requests()
-                ongoing = {(s['provider'], s['session']) for s in mb.agent_sessions()}
             finally:
                 mb.close()
-            work = {r['worker_session']: r for r in reqs if r['worker_session']}
-            sessions = transcripts.sessions(60)
-            for s in sessions:
-                s['project'] = projects.root_of(s['cwd'])[0]
-                s['ongoing'] = s['id'] in {sid for _, sid in ongoing}
-                s['teamChat'] = s['ongoing'] or s['id'] in work
-                if s['id'] in work and not s['ongoing']:
-                    s['title'] = 'Team request: ' + work[s['id']]['title']  # older one-off worker chats
-            _sessions_cache.update(at=time.time(), value={
-                'sessions': sessions, 'projects': projects.group(reqs, sessions, saved)})
+            _sessions_cache.update(at=time.time(), value={'sessions': [], 'projects': projects.group(reqs, [], saved)})
         return _sessions_cache['value']
 
 
@@ -508,12 +501,15 @@ def tray_status():
     return f'Crewroom {__version__} is running\n' + ' · '.join(news), [f'Crewroom {__version__} is running', *news], working
 
 
-def serve(port=paths.PORT):
+def serve(port=paths.PORT, dev=False):
+    """dev=True: a second copy for working on the window next to the installed Crewroom, on the same data. It runs
+    no Supervisor (two would restart and retry the same requests) and shows no tray icon."""
     httpd = Server(('127.0.0.1', port), Handler)
     from . import supervisor
-    supervisor.start_thread()
+    if not dev:
+        supervisor.start_thread()
     tray = None
-    if system.WINDOWS and not os.environ.get('TEAMCHAT_NO_TRAY'):
+    if system.WINDOWS and not dev and not os.environ.get('TEAMCHAT_NO_TRAY'):
         from .tray import Tray
         tray = Tray(WEB / 'assets' / 'app-icon.ico', open_window=lambda: system.open_window(status.url(port)),
                     stop=lambda: threading.Thread(target=httpd.shutdown, daemon=True).start(),
