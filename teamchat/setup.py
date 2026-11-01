@@ -72,13 +72,17 @@ def list_skills():
     for agent, dirs in SKILL_DIRS.items():
         seen = {}
         for d in dirs:
-            if not d.is_dir():
+            try:
+                skills = sorted(d.iterdir()) if d.is_dir() else []
+            except OSError:
                 continue
-            for skill in sorted(d.iterdir()):
+            for skill in skills:
                 md = skill / 'SKILL.md'
-                if skill.name in seen or not md.is_file():
-                    continue
+                # A skill that is a link Windows won't follow ("untrusted mount point", WinError 448) or that
+                # can't be read is skipped; it must never break the team dialog or creating a project.
                 try:
+                    if skill.name in seen or not md.is_file():
+                        continue
                     meta = _frontmatter(md.read_text(encoding='utf-8', errors='replace')[:4000])
                 except OSError:
                     continue
@@ -176,8 +180,10 @@ def configure(root, name, body, new_folder):
 
 def share_skills(root, share):
     """Copy the chosen skills into the project's skill folder for the *other* agent."""
-    installed = list_skills()
     result = {'codex': [], 'claude': []}
+    if not any(share.get(t) for t in result):
+        return result  # nothing to copy: don't even look at the installed skills
+    installed = list_skills()
     for target, source in (('codex', 'claude'), ('claude', 'codex')):
         wanted = set(share.get(target) or [])
         dest_root = root / PROJECT_SKILLS[target]
