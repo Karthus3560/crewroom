@@ -18,24 +18,32 @@
 - **Your rules:** Claude members run commands only if you tick *Can run commands*. Common destructive ones (git push, rm -rf, Remove-Item, registry, shutdown) are refused. It's a guard-rail, not a sandbox. Codex works inside its own workspace sandbox.
 - **One window:** projects, team chat with #general and #discussion, requests, galleries, and every agent's chat. Click a file path in a message to open it.
 
-## Install (Windows 10/11, macOS, Linux)
-1. You need:
-   - **Python 3.10+**. Windows: [python.org](https://www.python.org/downloads/), tick *Add python.exe to PATH*. macOS: [python.org](https://www.python.org/downloads/macos/) or `brew install python`. Linux: your package manager.
-   - at least one agent, signed in with your own plan: the **Claude** app ([claude.ai/download](https://claude.ai/download); open it once and switch to the **Code** tab) or Claude Code, and/or the **Codex** app ([chatgpt.com/codex](https://chatgpt.com/codex)) or Codex CLI.
+## Install
+
+You need at least one agent, signed in with your own plan: the **Claude** app ([claude.ai/download](https://claude.ai/download); open it once and switch to the **Code** tab) or Claude Code, and/or the **Codex** app ([chatgpt.com/codex](https://chatgpt.com/codex)) or Codex CLI.
+
+### Windows 10/11
+1. Download **[CrewroomSetup.exe](https://github.com/Karthus3560/crewroom/releases/latest)** and run it. Python is included; nothing else to install.
+   Windows says *"Windows protected your PC"*? Click **More info → Run anyway** (the installer isn't code-signed yet).
+2. Crewroom is now a normal program: in the Start menu and on the Desktop, and listed in **Settings → Apps → Installed apps**, where you uninstall it.
+3. **Updating:** run the newer CrewroomSetup.exe. It closes Crewroom and updates the installed program in place; it never adds a second copy. You can delete the downloaded file afterwards.
+
+### macOS and Linux
+1. You need **Python 3.10+**. macOS: [python.org](https://www.python.org/downloads/macos/) or `brew install python`. Linux: your package manager.
 2. Download the latest **[Crewroom zip](https://github.com/Karthus3560/crewroom/releases/latest/download/crewroom.zip)** and extract it. Keep the **Crewroom** folder somewhere permanent, for example `Documents`. Crewroom runs from that folder.
-3. Run the installer for your system:
+3. Run the installer:
 
    | System | Install | Uninstall |
    |---|---|---|
-   | Windows | double-click **`install.cmd`** | double-click `uninstall.cmd` |
    | macOS | double-click **`Install Crewroom.command`** | double-click `Uninstall Crewroom.command` |
    | Linux | `sh install.sh` | `sh uninstall.sh` |
+   | Windows without the exe | double-click `install.cmd` (needs Python) | double-click `uninstall.cmd` |
 
-   It adds the `team` skill to Claude and Codex and a way to open Crewroom: a Desktop and Start menu shortcut on Windows, **Crewroom** in Applications on macOS (Spotlight finds it), an app-menu entry on Linux.
-   - Windows says *"Windows protected your PC"*? Click **More info → Run anyway**.
-   - macOS says it can't check the file? Right-click it, choose **Open**, then **Open** again.
-   These are unsigned scripts, and you can read them first (`install.py` does the work).
-4. Open **Crewroom**, press **＋ New**, pick a folder, hire your crew.
+   It adds the `team` skill to Claude and Codex and a way to open Crewroom: **Crewroom** in Applications on macOS (Spotlight finds it), an app-menu entry on Linux.
+   macOS says it can't check the file? Right-click it, choose **Open**, then **Open** again.
+
+### Then
+Open **Crewroom**, press **＋ New**, pick a folder, hire your crew.
 
 Then just tell an agent: *"ask Codex to make 6 cozy icons for this app and tell me when they're done."*
 
@@ -57,3 +65,6 @@ Then just tell an agent: *"ask Codex to make 6 cozy icons for this app and tell 
 Designed by **Ghaith Saad Jawad**. Built with a Crewroom crew: Claude (code, film) and ChatGPT via Codex (art). The launch video's music is "Pixel Dreams" by DJ Lofi.
 
 MIT licence.
+
+## Building the Windows installer
+`python packaging/windows/build.py` makes `dist/CrewroomSetup-<version>.exe` (needs [Inno Setup 6](https://jrsoftware.org/isinfo.php); downloads Python's embeddable package once). Keep the AppId in `packaging/windows/crewroom.iss` unchanged forever: it is what makes a new installer update the installed Crewroom instead of adding a second one.

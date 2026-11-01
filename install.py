@@ -182,6 +182,12 @@ def where_to_open(launchers):
 def install(a, home, desktop):
     say(f'Crewroom {__version__} installer', 'title')
     say()
+    rec = status.installed()
+    if rec and rec.get('installer') == 'setup' and not a.from_setup and not status.same(rec.get('root'), ROOT):
+        say(f"Crewroom {rec.get('version', '')} is installed as a Windows program in {rec.get('root')}.", 'warn')
+        say('To update it, run the new CrewroomSetup.exe: it updates that program in place.')
+        say('To run Crewroom from this folder instead, uninstall it first: Settings > Apps > Installed apps > Crewroom.')
+        return 1
     tmp = Path(tempfile.gettempdir()).resolve()
     if ROOT == tmp or tmp in ROOT.parents:
         say('This folder is temporary: it looks like the zip was opened without extracting it.', 'bad')
@@ -189,7 +195,6 @@ def install(a, home, desktop):
         return 1
 
     # What is here already?
-    rec = status.installed()
     others = [r for r in dict.fromkeys(([rec['root']] if rec and rec.get('root') else []) + skill_roots(home))
               if not status.same(r, ROOT)]
     running = status.ping()
@@ -201,7 +206,7 @@ def install(a, home, desktop):
             say(f'  Crewroom{" " + v if v else ""} in {r}' + ('' if Path(r).exists() else '  (that folder is gone)'))
         if running and not status.same(running_root, ROOT):
             say(f"  It is running now (from {running_root or 'an unknown folder'}).")
-        if not ask(f'Replace it with Crewroom {__version__} from this folder ({ROOT})?', True, a.yes):
+        if not ask(f'Replace it with Crewroom {__version__} from this folder ({ROOT})?', True, a.yes or a.from_setup):
             say('Nothing changed.')
             return 0
     elif rec and status.same(rec.get('root'), ROOT):
@@ -237,9 +242,12 @@ def install(a, home, desktop):
         say(f'Skill:      {folder}')
 
     # 2. A way to open it. Launchers of a replaced install go first, so there is only ever one "Crewroom".
-    for old in (rec or {}).get('launchers', []) if others else []:
-        remove(old)
-    launchers = make_launchers(home, desktop, python)
+    #    The setup.exe makes its own Start menu and Desktop shortcuts (same names), so it skips this step.
+    launchers = []
+    if not a.from_setup:
+        for old in (rec or {}).get('launchers', []) if others else []:
+            remove(old)
+        launchers = make_launchers(home, desktop, python)
     for l in launchers:
         say(f'Open with:  {l}')
 
@@ -247,7 +255,7 @@ def install(a, home, desktop):
     paths.DATA.mkdir(parents=True, exist_ok=True)
     paths.INSTALL.write_text(json.dumps({
         'version': __version__, 'root': str(ROOT), 'python': python, 'skills': skills, 'backups': backups,
-        'launchers': launchers, 'installed': datetime.now(timezone.utc).isoformat(timespec='seconds'),
+        'launchers': launchers, 'installer': 'setup' if a.from_setup else 'script', 'installed': datetime.now(timezone.utc).isoformat(timespec='seconds'),
     }, indent=2), encoding='utf-8')
 
     # 4. Which agents can this computer run?
@@ -258,6 +266,8 @@ def install(a, home, desktop):
     say('Codex:       found' if codex else 'Codex:       not found. Install the Codex app (chatgpt.com/codex) or the Codex CLI, then sign in.',
         'ok' if codex else 'warn')
 
+    if a.from_setup:
+        return 0
     say()
     say(f'Done. Crewroom {__version__} is installed from {ROOT}', 'ok')
     say('Keep this folder where it is: Crewroom runs from it.')
@@ -279,7 +289,10 @@ def uninstall(a, home, desktop):
     say('Crewroom uninstaller', 'title')
     say()
     rec = status.installed() or {}
-    if not ask('Remove Crewroom (the team skill and its shortcut)? Your chats are kept.', True, a.yes):
+    if rec.get('installer') == 'setup' and not a.from_setup:
+        say('Crewroom is installed as a Windows program. Uninstall it from Settings > Apps > Installed apps > Crewroom.', 'warn')
+        return 1
+    if not ask('Remove Crewroom (the team skill and its shortcut)? Your chats are kept.', True, a.yes or a.from_setup):
         say('Nothing changed.')
         return 0
     if status.ping():
@@ -296,7 +309,8 @@ def uninstall(a, home, desktop):
             if not any(folder.iterdir()):
                 folder.rmdir()
             say(f'Removed {folder}')
-    for l in dict.fromkeys(list(rec.get('launchers', [])) + [str(p) for p in old_launchers(home, desktop)]):
+    leftovers = [] if a.from_setup else [str(p) for p in old_launchers(home, desktop)]  # setup.exe removes its own
+    for l in dict.fromkeys(list(rec.get('launchers', [])) + leftovers):
         if remove(l):
             say(f'Removed {l}')
     if paths.INSTALL.exists():
@@ -313,6 +327,7 @@ def main():
     ap.add_argument('--uninstall', action='store_true', help='remove the skill, the shortcut and the install record')
     ap.add_argument('--yes', action='store_true', help='answer yes to every question')
     ap.add_argument('--no-open', action='store_true', help="don't offer to open Crewroom at the end")
+    ap.add_argument('--from-setup', action='store_true', help=argparse.SUPPRESS)  # run by CrewroomSetup.exe: skill and record only
     ap.add_argument('--home', help=argparse.SUPPRESS)     # tests: a pretend home folder
     ap.add_argument('--desktop', help=argparse.SUPPRESS)  # tests: a pretend Desktop
     a = ap.parse_args()

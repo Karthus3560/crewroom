@@ -105,6 +105,9 @@ def report():
 
 
 def uninstall_hint(root):
+    rec = installed() or {}
+    if rec.get('installer') == 'setup':
+        return 'Windows Settings > Apps > Installed apps > Crewroom > Uninstall (or Control Panel > Programs)'
     root = Path(root)
     if system.WINDOWS:
         return f'double-click uninstall.cmd in {root}'
