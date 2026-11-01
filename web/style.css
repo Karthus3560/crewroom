@@ -470,3 +470,51 @@ details.older[open] summary::before { content: '▾ '; }
 .agent-tile.on.cursor { border-color: var(--cursor); } .agent-tile.on.antigravity { border-color: var(--antigravity); }
 .agent-tile.missing { opacity: .7; }
 @media (max-width: 760px) { .rules, .agent-tiles { grid-template-columns: 1fr 1fr; } .team-table th:nth-child(4), .team-table td:nth-child(4) { display: none; } }
+
+/* Add / Edit member pop-up */
+.dialog.member-dialog { width: min(920px, 95vw); }
+.member-dialog .m-pic { width: 44px; height: 44px; border-radius: 50%; }
+.m-body { padding: 18px 26px 10px; gap: 20px; }
+.m-section { display: flex; flex-direction: column; gap: 10px; }
+.m-section h4 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); font-weight: 750; }
+.m-section h4 .muted { text-transform: none; letter-spacing: 0; font-weight: 500; margin-left: 6px; }
+.m-two, .dlg-body section.m-two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }  /* beats .dlg-body section's column */
+.m-own .label-line { display: block; }
+.member-dialog .m-two input, .member-dialog .m-two select { font-size: 14px !important; padding: 10px 12px !important; }
+.member-dialog .agent-tiles { gap: 12px; }
+.member-dialog .agent-tile { padding: 14px 10px 12px; gap: 6px; border-radius: 14px; }
+.member-dialog .agent-tile .avatar { width: 64px; height: 64px; }
+.member-dialog .agent-tile b { font-size: 14px; }
+.member-dialog .agent-tile small { font-size: 11.5px; }
+.member-dialog .agent-tile.on { padding: 13px 9px 11px; }
+.role-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.role-card { text-align: left; border: 1px solid var(--line); background: var(--panel); border-radius: 12px; padding: 11px 14px; display: flex;
+  flex-direction: column; gap: 3px; color: var(--text); position: relative; transition: border-color .12s, background .12s; }
+.role-card b { font-size: 14px; }
+.role-card small { font-size: 12px; color: var(--muted); line-height: 1.35; }
+.role-card:hover { border-color: var(--agent, var(--accent)); }
+.role-card.on { border: 2px solid var(--agent, var(--accent)); padding: 10px 13px; background: color-mix(in srgb, var(--agent, var(--accent)) 14%, var(--panel)); }
+.role-card.on::after { content: "✓"; position: absolute; top: 9px; right: 12px; width: 20px; height: 20px; border-radius: 50%; display: grid;
+  place-items: center; font-size: 12px; font-weight: 800; color: #fff; background: var(--agent, var(--accent)); }
+.member-dialog[data-app="claude"] { --agent: var(--claude); }
+.member-dialog[data-app="codex"] { --agent: var(--codex); }
+.member-dialog[data-app="cursor"] { --agent: var(--cursor); }
+.member-dialog[data-app="antigravity"] { --agent: var(--antigravity); }
+.m-own { font-size: 13px; }
+.m-own textarea { min-height: 46px; }
+.switch-card { flex-direction: row !important; align-items: flex-start; gap: 12px !important; border: 1px solid var(--line); background: var(--panel);
+  border-radius: 12px; padding: 12px 14px; cursor: pointer; color: var(--text) !important; font-weight: 500 !important; }
+.switch-card input { position: absolute; opacity: 0; pointer-events: none; }
+.switch-card b { display: block; font-size: 14px; margin-bottom: 2px; }
+.switch-card small { display: block; font-size: 12px; color: var(--muted); line-height: 1.4; font-weight: 500; }
+.switch-card.caution small { color: #d97706; }
+.switch { flex: none; width: 36px; height: 20px; border-radius: 99px; background: var(--soft); border: 1px solid var(--line); position: relative;
+  margin-top: 2px; transition: background .15s; }
+.switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--muted);
+  transition: transform .15s, background .15s; }
+.switch-card input:checked + .switch { background: var(--agent, var(--accent)); border-color: var(--agent, var(--accent)); }
+.switch-card input:checked + .switch::after { transform: translateX(16px); background: #fff; }
+.switch-card input:focus-visible + .switch { outline: 2px solid var(--accent); outline-offset: 2px; }
+.switch-card[hidden] { display: none; }
+.m-note { margin: 0; font-size: 12.5px; color: var(--muted); background: var(--soft); border-radius: 10px; padding: 9px 12px; }
+@media (max-width: 760px) { .role-cards { grid-template-columns: 1fr 1fr; } .m-two, .member-dialog .agent-tiles { grid-template-columns: 1fr 1fr; } }

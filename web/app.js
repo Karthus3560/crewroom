@@ -830,8 +830,12 @@ function memberId(app, name) {
   return !slug || slug === app ? app : `${app}-${slug}`;
 }
 function freeHue(app, except = -1) {
+  // Colour is picked for you: the first member of an agent keeps its true colours; any extra member of the same agent
+  // gets a random shade nobody on the team is using yet.
   const used = new Set(draft.members.filter((m, i) => m.app === app && i !== except).map((m) => Number(m.hue || 0)));
-  return (setupInfo.hues || [0]).find((h) => !used.has(h)) ?? 0;  // the first member of an agent keeps its true colours
+  if (!used.has(0)) return 0;
+  const free = (setupInfo.hues || [0]).filter((h) => !used.has(h));
+  return free.length ? free[Math.floor(Math.random() * free.length)] : 0;
 }
 $('#add-member').onclick = () => openMember(-1);
 
@@ -842,11 +846,10 @@ function openMember(i) {
   editingMember = i;
   memberDraft = i >= 0 ? { ...draft.members[i], roles: [...draft.members[i].roles] } : { app: 'claude', name: '', model: '', roles: [], hue: 0 };
   $('#m-title').textContent = i >= 0 ? `Edit ${memberDraft.name}` : 'Add a member';
-  $('#m-sub').textContent = i >= 0 ? 'Change anything; it applies when you save the team.' : 'Pick the agent, give it a name and a model. Roles and the rest can wait.';
+  $('#m-sub').textContent = i >= 0 ? 'Changes apply when you save the team.' : 'Pick the agent, name it, choose its roles.';
   $('#m-save').textContent = i >= 0 ? 'Save member' : 'Add member';
   $('#m-err').textContent = '';
-  $('#m-more').open = i >= 0;
-  $('#m-apps').hidden = i >= 0;
+  $('#m-apps-section').hidden = i >= 0;  // a member's agent is fixed once it exists
   if (i < 0) pickApp(firstFoundApp(), true); else fillMember();
   $('#member-dialog').showModal();
   $('#m-name').focus();
@@ -862,40 +865,50 @@ function pickApp(app, fresh) {
   memberDraft.shell = false;
   fillMember();
 }
+const SHELL_TEXT = {
+  claude: 'Runs checks, builds and renders on its own. Common destructive commands are refused; a guard-rail, not a sandbox.',
+  antigravity: 'Runs commands in Antigravity’s terminal sandbox. Common destructive commands are refused.',
+  cursor: 'Careful: Cursor then runs any command without asking; Crewroom’s list of refused commands doesn’t reach Cursor yet.',
+};
 function fillMember() {
   const m = memberDraft;
   const info = appInfo(m.app);
+  $('#member-dialog').dataset.app = m.app;
   $('#m-apps').replaceChildren(...(setupInfo.apps || []).map((a) => el('button', { type: 'button',
     class: 'agent-tile ' + a.id + (a.id === m.app ? ' on' : '') + (a.found ? '' : ' missing'), onclick: () => pickApp(a.id, true) },
     avatar(a.id), el('b', {}, a.name), el('small', {}, a.blurb), a.found ? null : el('em', {}, 'not installed'))));
-  $('#m-pic').src = member(m.app).avatar || 'assets/icon-team-room.png';
+  const pic = $('#m-pic');
+  pic.src = member(m.app).avatar || 'assets/icon-team-room.png';
+  pic.style.filter = m.hue ? `hue-rotate(${m.hue}deg)` : '';
   $('#m-name').value = m.name;
   $('#m-model').replaceChildren(...(setupInfo.models[m.app] || [{ id: '', name: 'Default' }]).map((x) => el('option', { value: x.id, selected: x.id === (m.model || '') }, x.name)));
   $('#m-install').hidden = info.found !== false;
   $('#m-install').textContent = info.found === false ? `${info.name} isn't installed on this computer yet. ${info.install || ''}` : '';
-  $('#m-roles').replaceChildren(...setupInfo.presets.map((t) => el('button', { type: 'button', class: 'chip-role ' + m.app + (m.roles.includes(t) ? ' on' : ''),
-    title: t.split(' — ')[1] || t, onclick: (e) => { e.currentTarget.classList.toggle('on'); } }, ROLE_TITLE(t))));
+  $('#m-roles').replaceChildren(...setupInfo.presets.map((t) => {
+    const [title, what] = t.split(' — ');
+    return el('button', { type: 'button', class: 'role-card' + (m.roles.includes(t) ? ' on' : ''), 'data-role': t, 'aria-pressed': String(m.roles.includes(t)),
+      onclick: (e) => { const b = e.currentTarget; b.classList.toggle('on'); b.setAttribute('aria-pressed', String(b.classList.contains('on'))); } },
+      el('b', {}, title), el('small', {}, what || ''));
+  }));
   $('#m-own').value = m.roles.filter((r) => !setupInfo.presets.includes(r)).join('\n');
-  $('#m-shades').replaceChildren(...(setupInfo.hues || [0]).map((h) => el('button', { type: 'button', class: 'shade' + (h === Number(m.hue || 0) ? ' on' : ''),
-    title: h ? `Shade ${h}°` : 'True colours', onclick: (e) => {
-      memberDraft.hue = h;
-      $('#m-shades').querySelectorAll('.shade').forEach((b) => b.classList.toggle('on', b === e.currentTarget));
-    } }, el('img', { src: member(m.app).avatar || '', alt: '', style: tint(h) }))));
   $('#m-manual').checked = !!m.manual;
   $('#m-shell-row').hidden = !info.shell;
   $('#m-shell').checked = !!m.shell;
-  $('#m-notes').textContent = info.liveNotes === false ? `Notes you send while ${info.name} works reach it right after it finishes (as a follow-up).` : '';
+  $('#m-shell-text').textContent = SHELL_TEXT[m.app] || SHELL_TEXT.claude;
+  $('#m-shell-row').classList.toggle('caution', m.app === 'cursor');
+  $('#m-notes').hidden = info.liveNotes !== false;
+  $('#m-notes').textContent = `ⓘ Messages you send while ${info.name} is working reach it right after it finishes, as a follow-up. Claude and Codex read them mid-task.`;
 }
 function saveMember() {
   const m = memberDraft;
   m.name = $('#m-name').value.trim();
   m.model = $('#m-model').value;
-  m.roles = [...$('#m-roles').querySelectorAll('.chip-role.on')].map((b) => setupInfo.presets.find((t) => ROLE_TITLE(t) === b.textContent))
+  m.roles = [...$('#m-roles').querySelectorAll('.role-card.on')].map((b) => b.dataset.role)
     .concat($('#m-own').value.split('\n').map((x) => x.trim()).filter(Boolean));
   m.manual = $('#m-manual').checked;
   m.shell = appInfo(m.app).shell && $('#m-shell').checked;
   if (!m.name) { $('#m-err').textContent = 'Give the member a name'; return; }
-  if (!m.roles.length) { $('#m-more').open = true; $('#m-err').textContent = 'Pick at least one role'; return; }
+  if (!m.roles.length) { $('#m-err').textContent = 'Pick at least one role'; return; }
   const id = memberId(m.app, m.name);
   if (draft.members.some((o, i) => i !== editingMember && memberId(o.app, o.name) === id)) { $('#m-err').textContent = 'Another member already has this name'; return; }
   if (editingMember >= 0) draft.members[editingMember] = m; else draft.members.push(m);

@@ -147,24 +147,34 @@
   </form>
 </dialog>
 <dialog class="dialog member-dialog" id="member-dialog">
-  <div class="dlg-head"><img id="m-pic" src="assets/icon-team-room.png" alt="">
-    <div><h2 id="m-title">Add a member</h2><p id="m-sub">Pick the agent, give it a name and a model. Roles and the rest can wait.</p></div>
+  <div class="dlg-head"><img id="m-pic" class="m-pic" src="assets/icon-team-room.png" alt="">
+    <div><h2 id="m-title">Add a member</h2><p id="m-sub">Pick the agent, name it, choose its roles.</p></div>
     <button type="button" class="dlg-x" id="m-close" title="Close">✕</button></div>
-  <div class="dlg-body">
-    <div class="agent-tiles" id="m-apps"></div>
-    <div class="grid2">
+  <div class="dlg-body m-body">
+    <section class="m-section" id="m-apps-section">
+      <h4>Agent</h4>
+      <div class="agent-tiles" id="m-apps"></div>
+      <p class="dlg-err" id="m-install" hidden></p>
+    </section>
+    <section class="m-section m-two">
       <label>Name<input id="m-name" maxlength="40" placeholder="e.g. Designer"></label>
       <label>Model<select id="m-model"></select></label>
-    </div>
-    <p class="dlg-err" id="m-install" hidden></p>
-    <details id="m-more"><summary>Roles, colour and permissions</summary>
-      <label>Roles — pick as many as you like<div class="chips" id="m-roles"></div></label>
-      <label>Your own roles<textarea id="m-own" rows="2" placeholder="More roles, one per line — e.g. “Make the sound effects”"></textarea></label>
-      <label>Colour<div class="shades" id="m-shades"></div></label>
-      <label class="check"><input type="checkbox" id="m-manual"> Works in my own app — don’t start it in the background</label>
-      <label class="check" id="m-shell-row"><input type="checkbox" id="m-shell"> Can run commands — checks, builds, renders (common destructive commands are refused)</label>
-      <p class="muted small" id="m-notes"></p>
-    </details>
+    </section>
+    <section class="m-section">
+      <h4>Roles <span class="muted">pick as many as fit</span></h4>
+      <div class="role-cards" id="m-roles"></div>
+      <label class="m-own"><span class="label-line">Your own roles <span class="muted">· one per line</span></span><textarea id="m-own" rows="2" placeholder="e.g. Make the sound effects"></textarea></label>
+    </section>
+    <section class="m-section">
+      <h4>Permissions</h4>
+      <div class="m-two">
+        <label class="switch-card" id="m-manual-card"><input type="checkbox" id="m-manual">
+          <span class="switch"></span><span><b>Works in my own app</b><small>Crewroom won’t start it. Requests wait in its inbox until you open the app and ask it to check.</small></span></label>
+        <label class="switch-card" id="m-shell-row"><input type="checkbox" id="m-shell">
+          <span class="switch"></span><span><b>Can run commands</b><small id="m-shell-text">Checks, builds and renders on its own. Common destructive commands are refused.</small></span></label>
+      </div>
+    </section>
+    <p class="m-note" id="m-notes" hidden></p>
   </div>
   <div class="dlg-foot"><span class="dlg-err" id="m-err"></span>
     <button type="button" class="btn" id="m-cancel">Cancel</button><button type="button" class="btn primary" id="m-save">Add member</button></div>
