@@ -5,6 +5,7 @@
 Its install.sh copies the program to ~/.local/lib/crewroom (always the same place, so a newer package updates
 it in place), adds Crewroom to the apps menu and sets up the team skill. Uses the system's Python 3.10+.
 """
+import shutil
 import sys
 from pathlib import Path
 
@@ -96,7 +97,8 @@ def main():
     DIST.mkdir(exist_ok=True)
     out = DIST / f'{top}.tar.gz'
     a.tar(out)
-    print(f'{out} ({out.stat().st_size / 1e6:.1f} MB)')
+    shutil.copy2(out, DIST / 'crewroom-linux.tar.gz')  # the name the website links to
+    print(f'{out} ({out.stat().st_size / 1e6:.1f} MB), also as crewroom-linux.tar.gz')
 
 
 if __name__ == '__main__':

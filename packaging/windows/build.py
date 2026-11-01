@@ -72,7 +72,8 @@ def main():
     subprocess.run([iscc(), f'/DAppVersion={v}', f'/DSrc={REPO}', f'/DPyDir={py}', f'/O{DIST}', '/Q',
                     str(HERE / 'crewroom.iss')], check=True)
     out = DIST / f'CrewroomSetup-{v}.exe'
-    print(f'{out} ({out.stat().st_size / 1e6:.1f} MB)')
+    shutil.copy2(out, DIST / 'CrewroomSetup.exe')  # the name the website links to: releases/latest/download/CrewroomSetup.exe
+    print(f'{out} ({out.stat().st_size / 1e6:.1f} MB), also as CrewroomSetup.exe')
 
 
 if __name__ == '__main__':

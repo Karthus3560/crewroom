@@ -7,6 +7,7 @@ python.org or Homebrew, and if there is none it says so and offers the python.or
 re-points the team skill at itself, so moving or replacing the app (that's how you update) just works.
 """
 import io
+import shutil
 import sys
 from pathlib import Path
 
@@ -96,7 +97,8 @@ def main():
     DIST.mkdir(exist_ok=True)
     out = DIST / f'Crewroom-{v}-macOS.zip'
     a.zip(out)
-    print(f'{out} ({out.stat().st_size / 1e6:.1f} MB)')
+    shutil.copy2(out, DIST / 'Crewroom-macOS.zip')  # the name the website links to
+    print(f'{out} ({out.stat().st_size / 1e6:.1f} MB), also as Crewroom-macOS.zip')
 
 
 if __name__ == '__main__':
