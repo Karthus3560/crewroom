@@ -27,9 +27,10 @@ ADDING = '''
 ## Adding team members (only when the lead asked for it)
 If the lead asked for a new teammate, add it with one block, then dispatch its first task if there is one:
 ```add-member
-[{{"app": "claude" or "codex", "name": "<short name, e.g. 3D Designer>", "roles": ["<role — what it does>"], "model": ""}}]
+[{{"app": "claude", "codex", "cursor" or "antigravity", "name": "<short name, e.g. 3D Designer>", "roles": ["<role — what it does>"], "model": ""}}]
 ```
-Pick the app whose strengths fit (Codex: images, shell, builds; Claude: code, writing, review). New member ids are
+Pick the app whose strengths fit (Codex: images, shell, builds; Claude: code, writing, review; Cursor: code and
+refactors; Antigravity: Gemini models, research, review). Only pick Cursor or Antigravity if the lead uses them. New member ids are
 "<app>-<name in lowercase-with-dashes>". At most {max} per reply. Never add members the lead did not ask for.
 '''
 MAX_DEPTH = 8  # member-to-member steps in one chain (hops through the coordinator are free); stops runaway loops

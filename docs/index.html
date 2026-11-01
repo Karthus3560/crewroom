@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Crewroom: your AI team, together</title>
-  <meta name="description" content="Crewroom turns Claude Code and OpenAI Codex into one team on your computer: Windows, macOS or Linux. They hand work to each other, results land in one chat, and you lead.">
+  <meta name="description" content="Crewroom turns Claude Code, OpenAI Codex, Cursor and Google Antigravity into one team on your computer: Windows, macOS or Linux. They hand work to each other, results land in one chat, and you lead.">
   <link rel="canonical" href="https://karthus3560.github.io/crewroom/">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Crewroom">
@@ -36,7 +36,7 @@
     <section class="hero">
       <div class="hero-text">
         <h1>Your AI team.<br><em>One room.</em></h1>
-        <p class="lede">Crewroom turns <b>Claude Code</b> and <b>OpenAI Codex</b> into one team on your computer. They hand work to each other, results land in one chat, and you lead.</p>
+        <p class="lede">Crewroom turns <b>Claude Code</b>, <b>OpenAI Codex</b>, <b>Cursor</b> and <b>Google Antigravity</b> into one team on your computer. They hand work to each other, results land in one chat, and you lead.</p>
         <div class="cta">
           <a class="btn primary" id="download" href="https://github.com/Karthus3560/crewroom/releases/latest/download/CrewroomSetup.exe">Download for Windows</a>
           <a class="btn" href="#video">Watch the 2:23 video</a>
@@ -123,7 +123,7 @@
 
     <section id="install" class="install">
       <h2>Install</h2>
-      <p class="first">First, install and sign in to at least one agent with your own plan: the <a href="https://claude.ai/download">Claude app</a> (open it once and switch to the <b>Code</b> tab) or Claude Code, and/or the <a href="https://chatgpt.com/codex">Codex app</a> or Codex CLI.</p>
+      <p class="first">First, install and sign in to at least one agent with your own plan: Claude Code, Codex, Cursor Agent or the Antigravity CLI. The <a href="https://github.com/Karthus3560/crewroom/blob/main/AGENTS-SETUP.md">agent setup guide</a> walks through each one.</p>
       <div class="systems">
         <div class="system" id="windows">
           <h3>Windows 10/11</h3>
@@ -160,7 +160,7 @@
       <h2>Questions</h2>
       <details><summary>Does it cost anything?</summary><p>Crewroom itself is free and open source (MIT). The agents use <b>your own</b> Claude and ChatGPT plans, the same as when you use those apps directly.</p></details>
       <details><summary>Where does my data go?</summary><p>The app and its mailbox stay on your computer: <code>%USERPROFILE%\.crewroom</code> on Windows, <code>~/Library/Application Support/Crewroom</code> on macOS and <code>~/.local/share/crewroom</code> on Linux, with full agent logs in its <code>logs</code> folder. Agents send their work to their own providers, Anthropic and OpenAI, as usual. Crewroom only <i>reads</i> the apps' own chat files to show them. Creating or editing a team writes <code>TEAM.md</code>, creates or appends to <code>AGENTS.md</code> and <code>CLAUDE.md</code>, and may copy shared skills into <code>.claude/skills</code> and <code>.agents/skills</code> in your project folder.</p></details>
-      <details><summary>Do I need both Claude and Codex?</summary><p>No. One works. Hand-offs between the two shine when you have both.</p></details>
+      <details><summary>Which agents can I use?</summary><p>Claude Code, Codex, Cursor Agent and the Antigravity CLI, in any mix. One is enough; hand-offs shine when you have two or more. Each uses your own account. The <a href="https://github.com/Karthus3560/crewroom/blob/main/AGENTS-SETUP.md">agent setup guide</a> shows how to install, sign in to and check each one.</p></details>
       <details><summary>Does it keep running when I close the window?</summary><p>Yes, on purpose: your team can finish what they're doing. You can always see it. On Windows there's a Crewroom icon by the clock (hover for what's happening, right-click to stop), and in the window the bottom-left corner says <b>Running · click to stop</b>. You can also run <code>team status</code> or <code>team stop</code>.</p></details>
       <details><summary>How do I update?</summary><p>Install the new version the same way you installed the first one. It finds the Crewroom you have, closes it and replaces it, so you always have one Crewroom. Your chats are kept.</p></details>
       <details><summary>How do I remove it?</summary><p>Windows: Settings → Apps → Installed apps → Crewroom → Uninstall. macOS: the window's bottom-left corner → Uninstall, then move the app to the Trash. Linux: the same corner → Uninstall. Uninstalling removes the program, its shortcut and the team skill, and keeps your chats.</p></details>

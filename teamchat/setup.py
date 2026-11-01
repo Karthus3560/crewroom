@@ -37,6 +37,8 @@ ROLE_PRESETS = [
 DEFAULT_ROLES = {
     'claude': {'roles': [ROLE_PRESETS[0], ROLE_PRESETS[2]], 'model': ''},
     'codex': {'roles': [ROLE_PRESETS[1], 'Checker — runs builds, tests and shell checks'], 'model': ''},
+    'cursor': {'roles': [ROLE_PRESETS[0], 'Refactorer — tidies and restructures code'], 'model': ''},
+    'antigravity': {'roles': [ROLE_PRESETS[4], ROLE_PRESETS[2]], 'model': ''},
 }
 for _r in DEFAULT_ROLES.values():
     _r['role'] = '; '.join(_r['roles'])
@@ -108,6 +110,15 @@ def codex_models():
     models = [{'id': '', 'name': 'Default (your Codex setting)'}] + [m for m in models if m['id']]
     _models_cache.update(at=time.time(), value=models)
     return models
+
+
+def cli_models(app):
+    """Cursor lists hundreds of variants (each model x effort x fast); keep the picker short."""
+    from . import agents
+    found = agents.models(app)
+    if app == 'cursor':
+        found = [m for m in found if not m['id'].endswith('-fast')][:40]
+    return found
 
 
 # --- creating / updating ---------------------------------------------------------

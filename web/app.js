@@ -43,7 +43,10 @@ async function act(body, okText) {
 }
 const member = (id) => state.members[id] || { name: id, role: '', color: '#888' };
 const projectOf = (key) => state.projects.find((p) => p.key === key);
-const appOf = (id) => member(id).app || (String(id).startsWith('claude') ? 'claude' : String(id).startsWith('codex') ? 'codex' : 'human');
+const APP_IDS = ['antigravity', 'cursor', 'claude', 'codex'];  // longest first: ids are "<app>" or "<app>-<name>"
+const APP_NAMES = { claude: 'Claude', codex: 'Codex', cursor: 'Cursor', antigravity: 'Antigravity' };
+const appOf = (id) => member(id).app || APP_IDS.find((a) => String(id) === a || String(id).startsWith(a + '-')) || 'human';
+const appInfo = (app) => (setupInfo && (setupInfo.apps || []).find((a) => a.id === app)) || { id: app, name: APP_NAMES[app] || app, shell: app !== 'codex', liveNotes: app === 'claude' || app === 'codex' };
 const teamOf = (key) => (key && state.teams && state.teams[key]) || ['claude', 'codex'];
 const CHANNEL = { general: 'General', discussion: 'Discussion' };
 const tint = (hue) => (hue ? `filter:hue-rotate(${hue}deg)` : null);
@@ -543,7 +546,7 @@ function showMentions() {
     return el('button', { type: 'button', role: 'option', class: i === pick ? 'on' : '', 'aria-selected': i === pick ? 'true' : 'false',
       onmousedown: (e) => { e.preventDefault(); insertMention(id); } },
       avatar(id, true), el('span', { class: 'mp-name' }, member(id).name),
-      el('span', { class: 'mp-state' + (job ? ' busy' : '') }, job ? `working · reads your note mid-run` : (state.manual?.[state.project] || []).includes(id) ? 'works in its own app · waits in its inbox' : 'free · starts a new request'));
+      el('span', { class: 'mp-state' + (job ? ' busy' : '') }, job ? (appInfo(appOf(id)).liveNotes ? 'working · reads your note mid-run' : 'working · gets your note right after') : (state.manual?.[state.project] || []).includes(id) ? 'works in its own app · waits in its inbox' : 'free · starts a new request'));
   }));
 }
 function insertMention(id) {
@@ -578,6 +581,7 @@ $('#composer').addEventListener('submit', async (e) => {
       if (!body) return;
       const sent = await api('say', { body, requestId: state.view.id });
       if (sent.note === 'live') toast(`${member(state.requests.get(state.view.id).recipient).name} reads this mid-run and adapts`);
+      if (sent.note === 'after') toast(`${member(state.requests.get(state.view.id).recipient).name} gets this right after the current job`);
       else if (sent.note === 'start') toast('Added to the request before it starts');
     } else if (state.to === 'team') {
       if (!body) return;
@@ -586,6 +590,7 @@ $('#composer').addEventListener('submit', async (e) => {
       for (const m of sent.mentions || []) {
         const n = member(m.id).name;
         toast(m.how === 'live' ? `${n} is working: reads your note mid-run and adapts`
+          : m.how === 'after' ? `${n} is working: gets your note right after this job`
           : m.how === 'inbox' ? `${n} works in its own app: waiting in its inbox` : `${n} is on it: new request started`);
       }
     } else {
@@ -758,6 +763,10 @@ async function openProjectDialog(opts = {}) {
   $('#f-human').value = st.humanRole || setupInfo.humanRole;
   $('#f-fresh').value = st.freshEvery ?? setupInfo.freshEvery;
   $('#f-agents').replaceChildren(...team.map((m) => agentCard(m)));
+  for (const a of setupInfo.apps || []) {
+    const b = $('#add-' + a.id);
+    if (b) b.title = a.found ? `Add a ${a.name} member` : `${a.name} isn't installed yet: ${a.install}`;
+  }
   countMembers();
   refreshCoordinator(st.coordinator || '', st.referee || '', st.supervisor || '');
   for (const target of ['codex', 'claude']) {
@@ -784,7 +793,7 @@ function agentCard(m) {
       onclick: (e) => e.currentTarget.classList.toggle('on') }, title);
   }));
   const custom = current.filter((x) => !setupInfo.presets.includes(x));
-  const name = el('input', { class: 'name-input', oninput: () => refreshCoordinator(), value: m.name || '', placeholder: app === 'codex' ? 'e.g. Designer' : 'e.g. Builder', maxlength: 40 });
+  const name = el('input', { class: 'name-input', oninput: () => refreshCoordinator(), value: m.name || '', placeholder: { codex: 'e.g. Designer', cursor: 'e.g. Refactorer', antigravity: 'e.g. Researcher' }[app] || 'e.g. Builder', maxlength: 40 });
   const hue = m.hue ?? (m.id ? member(m.id).hue : undefined) ?? nextHue(app);
   const pic = avatar(app, false, hue);
   const shades = el('div', { class: 'shades' }, (setupInfo.hues || [0]).map((h) => el('button', {
@@ -800,14 +809,16 @@ function agentCard(m) {
       card.remove(); countMembers();
     } }, '✕'),
     el('div', { class: 'agent-top' }, pic, el('div', { style: 'flex:1;min-width:0;margin-right:22px' }, name,
-      el('span', {}, app === 'codex' ? 'Codex · ChatGPT models · images, shell, builds' : 'Claude · code, writing, review'))),
+      el('span', {}, appInfo(app).blurb || APP_NAMES[app]))),
     el('label', {}, 'Colour', shades),
     el('label', {}, 'Roles — pick as many as you like', chips),
     el('label', {}, 'Your own roles', el('textarea', { rows: 2, class: 'own-roles', placeholder: 'More roles, one per line — e.g. “Make the sound effects”' }, custom.join('\n'))),
-    el('label', {}, 'Model', el('select', { class: 'model' }, models.map((x) => el('option', { value: x.id, selected: x.id === (m.model || '') }, x.name)))),
+    el('label', {}, 'Model', el('select', { class: 'model' }, (models || [{ id: '', name: 'Default' }]).map((x) => el('option', { value: x.id, selected: x.id === (m.model || '') }, x.name)))),
+    appInfo(app).found === false ? el('div', { class: 'dlg-err', style: 'font-size:12px' }, `${APP_NAMES[app]} isn't installed on this computer yet. ${appInfo(app).install || ''}`) : null,
+    appInfo(app).liveNotes ? null : el('div', { class: 'muted', style: 'font-size:12px' }, `Notes you send while ${APP_NAMES[app]} works reach it right after it finishes (as a follow-up).`),
     el('label', { class: 'check', title: 'Use for the agent you chat with yourself (e.g. your open Claude Code session)' },
       el('input', { type: 'checkbox', class: 'manual', checked: !!m.manual }), 'Works in my own app — don’t start it in the background'),
-    app === 'claude' ? el('label', { class: 'check', title: 'Lets this member run checks, builds, snapshots and renders itself. Deleting folders, git push/reset and system changes stay blocked.' },
+    appInfo(app).shell ? el('label', { class: 'check', title: 'Lets this member run checks, builds, snapshots and renders itself. Deleting folders, git push/reset and system changes stay blocked.' },
       el('input', { type: 'checkbox', class: 'shell', checked: !!m.shell }), 'Can run commands — checks, builds, renders (common destructive commands are refused; a guard-rail, not a sandbox)')
       : el('div', { class: 'muted', style: 'font-size:12px' }, 'Codex runs commands in its own sandbox.'));
   return card;
@@ -833,7 +844,7 @@ function memberId(app, name) {
   return !slug || slug === app ? app : `${app}-${slug}`;
 }
 function refreshCoordinator(selected, selectedReferee, selectedSupervisor) {
-  const options = membersFromDialog().filter((m) => m.name).map((m) => [memberId(m.app, m.name), `${m.name} (${m.app === 'codex' ? 'Codex' : 'Claude'})`]);
+  const options = membersFromDialog().filter((m) => m.name).map((m) => [memberId(m.app, m.name), `${m.name} (${APP_NAMES[m.app] || m.app})`]);
   for (const [sel, keep, none] of [[$('#f-coordinator'), selected, 'None — I route work myself'],
                                    [$('#f-referee'), selectedReferee, 'None — long chains wait for my OK'],
                                    [$('#f-supervisor'), selectedSupervisor, 'None — Crewroom only restarts and retries']]) {
@@ -844,12 +855,12 @@ function refreshCoordinator(selected, selectedReferee, selectedSupervisor) {
 function countMembers() {
   refreshCoordinator();
   const cards = [...document.querySelectorAll('#f-agents .agent-card')];
-  const c = cards.filter((x) => x.dataset.app === 'claude').length;
-  $('#member-count').textContent = `· ${cards.length} member${cards.length > 1 ? 's' : ''} (${c} Claude, ${cards.length - c} Codex)`;
+  const per = APP_IDS.map((a) => [APP_NAMES[a], cards.filter((x) => x.dataset.app === a).length]).filter(([, n]) => n);
+  $('#member-count').textContent = `· ${cards.length} member${cards.length > 1 ? 's' : ''} (${per.map(([n, c]) => `${c} ${n}`).join(', ')})`;
 }
 function addMember(app) {
   const n = document.querySelectorAll(`#f-agents .agent-card[data-app=${app}]`).length;
-  const base = app === 'codex' ? 'Codex' : 'Claude';
+  const base = APP_NAMES[app] || app;
   const card = agentCard({ app, name: n ? `${base} ${n + 1}` : base, roles: [] });
   $('#f-agents').append(card);
   countMembers();
@@ -858,6 +869,8 @@ function addMember(app) {
 }
 $('#add-claude').onclick = () => addMember('claude');
 $('#add-codex').onclick = () => addMember('codex');
+$('#add-cursor').onclick = () => addMember('cursor');
+$('#add-antigravity').onclick = () => addMember('antigravity');
 function setMode(m) {
   dialogMode = m;
   document.querySelectorAll('#dlg-mode button').forEach((b) => b.classList.toggle('on', b.dataset.m === m));
@@ -961,7 +974,7 @@ async function showWelcome() {
   try { c = await api('setup-check'); } catch { $('#welcome-body').replaceChildren(el('p', {}, 'Could not reach the Crewroom server.')); return; }
   const row = (ok, title, hint) => el('div', { class: 'check' }, el('span', { class: 'check-mark ' + (ok ? 'ok' : 'no') }, ok ? '✓' : '!'),
     el('div', {}, title, ok ? null : el('small', {}, hint)));
-  const agents = !!(c.claude || c.codex);
+  const agents = !!(c.claude || c.codex || Object.values(c.agents || {}).some((a) => a.found));
   $('#welcome-body').replaceChildren(
     el('section', {}, el('h3', {}, 'How it works'), el('ol', { class: 'how' },
       el('li', {}, el('b', {}, 'You lead. '), 'Make a project (a folder) and pick your crew: Claude and Codex members, each with a role.'),
@@ -973,7 +986,11 @@ async function showWelcome() {
       row(!!c.codex, c.codex ? 'Codex is installed' : 'Codex was not found', 'Install the Codex app (chatgpt.com/codex) or the Codex CLI and sign in.'),
       row(c.skills.claude && c.skills.codex, c.skills.claude && c.skills.codex ? 'The team skill is set up for Claude and Codex'
         : 'The team skill is not set up', 'Run the Crewroom installer again: it sets this up for both apps.'),
-      agents ? null : el('p', {}, 'Crewroom needs at least one of Claude Code or Codex. Install one, then press Check again.')),
+      ...Object.values(c.agents || {}).filter((a) => a.optional).map((a) => row(a.found, a.found ? `${a.name} is installed (optional)` : `${a.name} is not installed (optional)`,
+        `${a.install} Then: ${a.login}`)),
+      agents ? null : el('p', {}, 'Crewroom needs at least one of Claude Code, Codex, Cursor or Antigravity. Install one, then press Check again.')),
+      el('p', { class: 'muted', style: 'font-size:12.5px;margin:0' }, 'Step-by-step install and sign-in for every agent: ',
+        el('a', { href: 'https://github.com/Karthus3560/crewroom/blob/main/AGENTS-SETUP.md', target: '_blank', rel: 'noopener' }, 'the agent setup guide'), '.'),
       el('div', {}, el('button', { type: 'button', class: 'link-btn', onclick: () => showWelcome() }, 'Check again'))),
     el('section', {}, el('h3', {}, 'Try it'), el('div', { class: 'try' },
       'Open a ', el('b', {}, 'new'), ' chat in Claude or Codex (chats that were already open don’t know the skill yet) and say: ',

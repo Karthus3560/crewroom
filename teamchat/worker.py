@@ -8,6 +8,7 @@ list. Requests for the same agent and project run one at a time; others wait as 
 import json
 import os
 import queue
+import re
 import subprocess
 import sys
 import threading
@@ -16,7 +17,7 @@ import uuid
 from pathlib import Path
 
 from . import paths, projects, system
-from . import dispatch, members as team
+from . import agents, dispatch, members as team
 from .db import Mailbox
 
 HIDDEN = system.hidden()  # Popen options: no console window on Windows
@@ -342,6 +343,58 @@ def run_claude(mb, req, project, cwd, prompt, log, should_stop):
     return final, session
 
 
+def run_cli(mb, req, project, cwd, prompt, log, should_stop):
+    """Cursor Agent or the Antigravity CLI: one print-mode turn, continuing the member's chat when it has one.
+    Notes from the lead can't reach these mid-run; they are carried into a follow-up request instead."""
+    member = project['member']
+    app = member['app']
+    spec = agents.AGENTS[app]
+    if not agents.command(app):
+        raise RuntimeError(f'{spec.name} is not installed on this computer. {spec.install}')
+    known = project['session']
+    root = project['root'] or cwd
+    text = agents.brief((FIRST.format(name=member['name'], recap=project['recap']) if not known else '') + prompt, req['id'])
+    proc = subprocess.Popen(agents.argv(app, member, root, cwd, known, text), cwd=root, stdin=subprocess.DEVNULL,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace', **HIDDEN)
+    lines = queue.Queue()
+    threading.Thread(target=lambda: [lines.put(l) for l in proc.stdout] + [lines.put(None)], daemon=True).start()
+    session, final, failed, end, tail = known, '', False, time.time() + TIMEOUT, []
+    remembered = False
+    while True:
+        if should_stop() or time.time() > end:
+            proc.kill()
+            raise Cancelled() if should_stop() else TimeoutError(f'Stopped after {TIMEOUT // 60} minutes')
+        try:
+            line = lines.get(timeout=2)
+        except queue.Empty:
+            continue
+        if line is None:
+            break
+        log.write(line)
+        log.flush()
+        try:
+            event = json.loads(line)
+        except ValueError:
+            tail = (tail + [line.strip()])[-12:]  # not JSON: a message from the program itself (login, errors)
+            continue
+        got = agents.read(app, event)
+        if got.get('session') and not remembered:
+            session, remembered = got['session'], True
+            mb.remember_session(project['key'], member['id'], session, project['turns'] + 1 if known else 1)
+            mb.link(req['id'], worker_session=session)
+        if 'final' in got:
+            final, failed = got['final'], got['error']
+    code = proc.wait()
+    if failed or (code != 0 and not final):
+        if known and not remembered:
+            mb.forget_session(project['key'], member['id'])  # the old chat is gone: start a new one next time
+        said = final or '\n'.join(tail) or f'{spec.name} exited with code {code}'
+        if re.search(r'not logged in|log ?in|sign ?in|authenticat', said, re.I):
+            said += f'\n\n{spec.name} needs you to sign in once: {spec.login}'
+        raise RuntimeError(said)
+    return final, session
+
+
 # --- the worker process --------------------------------------------------------
 def notify(req):
     """Tell an asking Codex chat. Everyone else sees the window or uses `team wait`."""
@@ -394,7 +447,7 @@ def work(rid):
         roles_line = ''
         if member.get('roles'):
             roles_line = f"- You are **{member['name']}**. Your roles here: {'; '.join(member['roles'])}\n"
-        if member['app'] == 'claude':
+        if agents.AGENTS[member['app']].shell:
             roles_line += (SHELL_YES if member.get('shell') else SHELL_NO)
         names = team.display(mb.saved_projects())
         prompt = PROMPT.format(rid=rid, asker=names.get(req['sender'], {}).get('name', req['sender']), title=req['title'],
@@ -407,7 +460,7 @@ def work(rid):
         if req['sender'] == 'human' and settings.get('coordinator') != member['id'] and settings.get('members'):
             prompt += dispatch.ADDING.format(max=dispatch.MAX_NEW_MEMBERS)
         with open(log_path, 'a', encoding='utf-8') as log:
-            run = run_codex if member['app'] == 'codex' else run_claude
+            run = {'codex': run_codex, 'claude': run_claude}.get(member['app'], run_cli)
             final, session = run(mb, req, project, cwd, prompt, log, should_stop)
         taken = mb.attached_paths()
         files = [f for f in changed_files(before, cwd, limit=200) if str(Path(f).resolve()) not in taken][:24]

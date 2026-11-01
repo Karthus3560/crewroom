@@ -13,6 +13,8 @@ You are one member of a small team that shares a local mailbox. The user watches
 | **You (the user)** | Lead: sets goals, approves anything risky |
 | **Claude** | Code, writing, reviews, planning. In background mode it reads and edits files, and runs commands only if the lead ticked "Can run commands" for that member |
 | **Codex** | Code, shell checks and builds, **image generation** (ChatGPT image model) |
+| **Cursor** (if the lead uses it) | Code and refactors, with Cursor's many models (Auto picks one per task) |
+| **Antigravity** (if the lead uses it) | Google's agent: Gemini models plus Claude and GPT-OSS; research, review, code |
 
 ## The command
 
@@ -20,7 +22,8 @@ You are one member of a small team that shares a local mailbox. The user watches
 {{TEAM_COMMAND}} [--as claude|codex] <command>
 ```
 
-Identity is auto-detected inside Claude Code; **Codex must pass `--as codex`**. Below, `team` means that whole command.
+Identity is auto-detected inside Claude Code. **Codex must pass `--as codex`, Cursor `--as cursor` and Antigravity
+`--as antigravity`** (or your member id, e.g. `--as cursor-reviewer`). Below, `team` means that whole command.
 
 | Command | Use it to |
 |---|---|

@@ -12,7 +12,7 @@ from urllib.parse import parse_qs, urlparse
 import re
 import subprocess
 
-from . import __version__, members as team, paths, projects, setup, status, system, transcripts, worker
+from . import __version__, agents, members as team, paths, projects, setup, status, system, transcripts, worker
 from .db import OPEN, Mailbox
 
 WEB = paths.ROOT / 'web'
@@ -79,7 +79,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self.file(url.path.rsplit('/', 1)[1], q.get('download') == '1')
             if url.path == '/api/setup-info':
                 return self._send(200, {'skills': setup.list_skills(),
-                                        'models': {'claude': setup.CLAUDE_MODELS, 'codex': setup.codex_models()},
+                                        'models': {'claude': setup.CLAUDE_MODELS, 'codex': setup.codex_models(),
+                                                   **{a: setup.cli_models(a) for a in agents.CLI_AGENTS}},
+                                        'apps': [{'id': a.id, 'name': a.name, 'color': a.color, 'blurb': a.blurb,
+                                                  'shell': a.shell, 'liveNotes': a.live_notes, 'found': bool(agents.command(a.id)),
+                                                  'install': a.install} for a in agents.AGENTS.values()],
                                         'presets': setup.ROLE_PRESETS, 'defaults': setup.DEFAULT_ROLES,
                                         'freshEvery': team.DEFAULT_FRESH_EVERY, 'humanRole': team.DEFAULT_HUMAN_ROLE,
                                         'hues': team.HUES,
@@ -400,12 +404,15 @@ def _find(base, rel, limit=4000):
 
 
 def note_running(mb, req, text):
-    """Give a note to a request that hasn't finished. 'live' = the agent reads it mid-run, 'start' = before it starts."""
+    """Give a note to a request that hasn't finished. 'live' = the agent reads it mid-run, 'start' = before it starts,
+    'after' = it is working and can't read notes mid-run (Cursor, Antigravity): the note becomes a follow-up request."""
     saved = mb.project(projects.root_of(req['cwd'])[0]) if req['cwd'] else None
     if req['status'] not in ('asked', 'queued', 'working') or team.is_manual(saved and saved['settings'], req['recipient']):
         return None
     mb.nudge(req['id'], text)
-    return 'live' if req['status'] == 'working' else 'start'
+    if req['status'] != 'working':
+        return 'start'
+    return 'live' if agents.AGENTS[team.app_of(req['recipient'])].live_notes else 'after'
 
 
 def mention_members(mb, key, channel, text):
@@ -420,9 +427,9 @@ def mention_members(mb, key, channel, text):
                    and projects.root_of(r['cwd'])[0] == key]
         how = note_running(mb, working[0], text) if working else None
         if how:
-            mb.say(mid, f"Working on **{working[0]['title']}**. I'll read your note between steps and adapt.",
-                   project=key, channel=channel, kind='note')
-            out.append({'id': mid, 'how': 'live', 'request': working[0]['id']})
+            mb.say(mid, f"Working on **{working[0]['title']}**. " + ("I'll read your note between steps and adapt." if how == 'live'
+                   else "I'll pick up your note as soon as I finish this."), project=key, channel=channel, kind='note')
+            out.append({'id': mid, 'how': how, 'request': working[0]['id']})
             continue
         first = ' '.join(text.split())[:80]
         req = mb.ask('human', mid, f'{first}', f'The lead wrote in #{channel} and tagged you:\n\n> ' + text.replace('\n', '\n> '),
@@ -482,6 +489,7 @@ def setup_check():
     return {'version': __version__, 'system': 'windows' if system.WINDOWS else 'mac' if system.MAC else 'linux',
             'claude': paths.find_claude(), 'codex': paths.find_codex(),
             'skills': {'claude': skill('.claude/skills/team-chat'), 'codex': skill('.agents/skills/team-chat')},
+            'agents': agents.setup_status(),
             'onboarded': ONBOARDED.exists(), 'tray': system.WINDOWS and not os.environ.get('TEAMCHAT_NO_TRAY')}
 
 

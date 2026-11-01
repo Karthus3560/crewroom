@@ -489,6 +489,63 @@ class MentionTests(unittest.TestCase):
         self.assertEqual(self.started, [new['id']])
         self.assertEqual(self.mb.take_nudges(req['id']), [])
 
+class AgentTests(unittest.TestCase):
+    def setUp(self):
+        from teamchat import agents
+        self.agents = agents
+        self._command = agents.command
+        agents.command = lambda app: ['TOOL']
+
+    def tearDown(self):
+        self.agents.command = self._command
+
+    def test_ids_map_to_apps(self):
+        a = self.agents
+        self.assertEqual([a.app_of(x) for x in ('cursor', 'cursor-reviewer', 'antigravity-designer', 'codex-art', 'claude', 'human', 'cursorx')],
+                         ['cursor', 'cursor', 'antigravity', 'codex', 'claude', 'human', 'human'])
+
+    def test_cursor_command(self):
+        args = self.agents.argv('cursor', {'model': 'gpt-5.2'}, 'C:/p', 'C:/p', 'chat-1', 'do it')
+        self.assertEqual(args[:4], ['TOOL', '-p', '--output-format', 'stream-json'])
+        self.assertNotIn('--force', args)  # no commands unless the lead allowed them
+        self.assertEqual(args[-1], 'do it')
+        self.assertEqual(args[args.index('--resume') + 1], 'chat-1')
+        self.assertIn('--force', self.agents.argv('cursor', {'shell': True}, 'C:/p', 'C:/p', None, 'x'))
+
+    def test_antigravity_command_keeps_prompt_last_and_limits_permissions(self):
+        args = self.agents.argv('antigravity', {}, 'C:/p', 'C:/p', 'conv-1', 'do it')
+        self.assertEqual(args[-2:], ['-p', 'do it'])
+        perms = json.loads(args[args.index('--settings') + 1])['permissions']
+        self.assertIn('write_file(*)', perms['allow'])
+        self.assertIn('command(*)', perms['deny'])
+        self.assertEqual(args[args.index('--conversation') + 1], 'conv-1')
+        shell = self.agents.argv('antigravity', {'shell': True}, 'C:/p', 'C:/p', None, 'x')
+        self.assertIn('--sandbox', shell)
+        self.assertIn('command(git push*)', json.loads(shell[shell.index('--settings') + 1])['permissions']['deny'])
+
+    def test_reading_progress(self):
+        r = self.agents.read
+        self.assertEqual(r('cursor', {'type': 'system', 'subtype': 'init', 'session_id': 's1'}), {'session': 's1'})
+        self.assertEqual(r('cursor', {'type': 'result', 'subtype': 'success', 'result': 'ok', 'is_error': False}), {'final': 'ok', 'error': False})
+        self.assertEqual(r('antigravity', {'event': 'init', 'conversation_id': 'c1'}), {'session': 'c1'})
+        done = r('antigravity', {'event': 'result', 'result': {'status': 'SUCCESS', 'response': 'hi', 'conversation_id': 'c1'}})
+        self.assertEqual((done['final'], done['error']), ('hi', False))
+        self.assertTrue(r('antigravity', {'event': 'result', 'result': {'status': 'ERROR'}})['error'])
+
+    def test_long_prompts_go_through_a_file(self):
+        text = 'x' * (self.agents.LONG_PROMPT + 10)
+        short = self.agents.brief(text, 'abc12345')
+        self.assertLess(len(short), 2000)
+        self.assertEqual((paths.DATA / 'briefs' / 'abc12345.md').read_text(encoding='utf-8'), text)
+
+    def test_notes_to_a_busy_cursor_member_wait_for_the_next_request(self):
+        mb = Mailbox(Path(TMP) / 'agent-notes.db')
+        req = mb.ask('human', 'cursor', 'Refactor')
+        mb.set_status(req['id'], 'working', 'cursor')
+        self.assertEqual(server.note_running(mb, mb.request(req['id']), 'also rename x'), 'after')
+        mb.close()
+
+
 class SystemTests(unittest.TestCase):
     def test_lock_is_exclusive_and_released(self):
         path = Path(TMP) / 'lock-test'

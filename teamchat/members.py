@@ -1,15 +1,14 @@
-"""Team members. A project's team can hold any mix of Claude and Codex members (e.g. three Codex
-designers and one Claude builder). Each member has a name, an app (claude or codex), roles and a
-model, and keeps its own ongoing chat in the project.
+"""Team members. A project's team can hold any mix of agents: Claude, Codex, Cursor and Antigravity members
+(e.g. three Codex designers and one Claude builder). Each member has a name, an app (see agents.py), roles
+and a model, and keeps its own ongoing chat in the project.
 
-Member ids are stable and always start with their app: "claude", "codex", "codex-designer", ...
+Member ids are stable and always start with their app: "claude", "codex", "codex-designer", "cursor-reviewer", ...
 """
 import re
 
-APPS = {
-    'claude': {'name': 'Claude', 'color': '#d97757'},
-    'codex': {'name': 'Codex', 'color': '#10a37f'},
-}
+from .agents import AGENTS, app_of  # noqa: F401  (app_of is part of this module's interface)
+
+APPS = {a.id: {'name': a.name, 'color': a.color} for a in AGENTS.values()}
 HUMAN = {'name': 'You', 'role': 'Lead', 'color': '#c2410c', 'app': 'human'}
 DEFAULT_HUMAN_ROLE = 'Lead — sets goals and approves the results'
 DEFAULT_FRESH_EVERY = 6
@@ -50,14 +49,12 @@ def human_role(settings):
     return settings.get('humanRole') or ((settings.get('roles') or {}).get('human') or {}).get('role') or DEFAULT_HUMAN_ROLE
 
 
-def app_of(mid):
-    return 'claude' if str(mid).startswith('claude') else 'codex' if str(mid).startswith('codex') else 'human'
-
-
 def display(saved_projects):
     """Everyone who can appear in the chat: you, the two base agents and every project member."""
     out = {'human': dict(HUMAN), 'claude': {'name': 'Claude', 'role': 'Builder · code, writing, review', 'color': APPS['claude']['color'], 'app': 'claude'},
            'codex': {'name': 'Codex', 'role': 'Builder · code, images, shell checks', 'color': APPS['codex']['color'], 'app': 'codex'}}
+    for a in AGENTS.values():  # Cursor, Antigravity, ...: askable by their plain id too
+        out.setdefault(a.id, {'name': a.name, 'role': a.blurb, 'color': a.color, 'app': a.id})
     for p in saved_projects:
         for m in team(p['settings']):
             out.setdefault(m['id'], {'name': m['name'], 'role': '; '.join(m.get('roles') or [])[:120],
@@ -101,9 +98,9 @@ def clean(given, human):
         if hue is None:
             hue = auto_hue(mid, {o['hue'] for o in out if o['app'] == app})
         out.append({'id': mid, 'name': name, 'app': app, 'roles': jobs, 'model': str(m.get('model') or '')[:60], 'hue': hue,
-                    'manual': bool(m.get('manual')), 'shell': bool(m.get('shell')) and app == 'claude'})
+                    'manual': bool(m.get('manual')), 'shell': bool(m.get('shell')) and AGENTS[app].shell})
     if not out:
-        raise ValueError('The team needs at least one Claude or Codex member')
+        raise ValueError('The team needs at least one member')
     if len(out) > 12:
         raise ValueError('Up to 12 members per project')
     return out

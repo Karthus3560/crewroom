@@ -23,6 +23,10 @@ def whoami(explicit=None):
         return 'claude'
     if any(k.startswith('CODEX_') and k != 'CODEX_HOME' for k in os.environ):
         return 'codex'
+    if os.environ.get('CURSOR_AGENT') or os.environ.get('CURSOR_TRACE_ID'):
+        return 'cursor'
+    if os.environ.get('ANTIGRAVITY_LS_ADDRESS') or os.environ.get('ANTIGRAVITY_AGENT'):
+        return 'antigravity'
     return 'human'
 
 
@@ -49,11 +53,11 @@ def show(mb, rid):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(prog='team', description='Talk to your AI teammates through Team Chat.')
-    ap.add_argument('--as', dest='me', help='who is speaking: claude, codex or your member id (auto-detected)')
+    ap.add_argument('--as', dest='me', help='who is speaking: claude, codex, cursor, antigravity or your member id (auto-detected)')
     sub = ap.add_subparsers(dest='cmd', required=True)
 
     s = sub.add_parser('ask', help='ask a teammate to do something')
-    s.add_argument('to', help='member id: claude, codex, or a project member like codex-designer (see `team roles`)')
+    s.add_argument('to', help='member id: claude, codex, cursor, antigravity, or a project member like codex-designer (see `team roles`)')
     s.add_argument('title')
     s.add_argument('--body', default='', help='details, Markdown welcome')
     s.add_argument('--cwd', default=None, help='folder the work belongs in (default: current folder)')

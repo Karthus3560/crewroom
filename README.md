@@ -2,7 +2,7 @@
 
 # Crewroom
 
-**Your AI team, together.** Crewroom turns Claude Code and OpenAI Codex into one team on your computer (Windows, macOS or Linux). They hand work to each other, results land in one chat, and you lead.
+**Your AI team, together.** Crewroom turns Claude Code, OpenAI Codex, Cursor and Google Antigravity into one team on your computer (Windows, macOS or Linux). They hand work to each other, results land in one chat, and you lead.
 
 ▶ **[Watch the video (2:23) and see the site](https://karthus3560.github.io/crewroom/)**
 
@@ -20,7 +20,7 @@
 
 ## Install
 
-You need at least one agent, signed in with your own plan: the **Claude** app ([claude.ai/download](https://claude.ai/download); open it once and switch to the **Code** tab) or Claude Code, and/or the **Codex** app ([chatgpt.com/codex](https://chatgpt.com/codex)) or Codex CLI.
+You need at least one agent, signed in with your own plan: **Claude Code**, **Codex**, **Cursor Agent** or the **Antigravity CLI**. The **[agent setup guide](AGENTS-SETUP.md)** shows how to install, sign in to and check each one.
 
 ### Windows 10/11
 1. Download **[CrewroomSetup.exe](https://github.com/Karthus3560/crewroom/releases/latest)** and run it. Python is included; nothing else to install.

@@ -6,7 +6,8 @@ Double-click the file for your system instead of running this directly:
     Linux:   sh install.sh / sh uninstall.sh
 
 It changes nothing outside these places:
-    the "team" skill for Claude and Codex   ~/.claude/skills/team-chat and ~/.agents/skills/team-chat
+    the "team" skill for the agents         ~/.claude/skills/team-chat (Claude), ~/.agents/skills/team-chat (Codex,
+                                            Antigravity) and ~/.cursor/skills/team-chat (Cursor)
                                             (a skill that was there before Crewroom is kept as SKILL.md.bak)
     a way to open Crewroom                  Windows: Desktop and Start menu shortcuts
                                             macOS:   ~/Applications/Crewroom.app (Spotlight and Launchpad find it)
@@ -33,7 +34,7 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 from teamchat import __version__, paths, status, system  # noqa: E402
 
-SKILL_DIRS = ('.claude/skills/team-chat', '.agents/skills/team-chat')
+SKILL_DIRS = ('.claude/skills/team-chat', '.agents/skills/team-chat', '.cursor/skills/team-chat')  # Codex and Antigravity read .agents
 PACKAGE_NAME = 'CrewroomSetup.exe' if system.WINDOWS else 'Crewroom.app (replace the old one in Applications)' if system.MAC     else 'Crewroom package (run its install.sh)'
 TEAM_PY = re.compile(r'"([^"]+?)[\\/]team\.py"')  # the folder a Crewroom skill points at
 
