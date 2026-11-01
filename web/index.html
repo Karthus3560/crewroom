@@ -85,65 +85,106 @@
   <div class="lightbox-bar" id="lightbox-bar"></div>
 </div>
 
-<dialog class="dialog" id="project-dialog">
+<dialog class="dialog wizard" id="project-dialog">
   <form method="dialog" id="project-form" autocomplete="off">
     <header class="dlg-head">
       <img src="assets/icon-folder.png" alt="">
-      <div><h2 id="dlg-title">New project</h2><p id="dlg-sub">Make a folder and set up who does what. Every team chat for it lives in that folder.</p></div>
+      <div><h2 id="dlg-title">New project</h2><p id="dlg-sub">Pick a folder, hire your team, then set the rules. You can change the team later.</p></div>
       <button type="button" class="dlg-x" id="dlg-close" title="Close">✕</button>
     </header>
-    <div class="dlg-body">
-      <section id="where">
-        <div class="seg big" id="dlg-mode"><button type="button" data-m="new" class="on">New folder</button><button type="button" data-m="existing">Use an existing folder</button></div>
-        <div class="grid2" id="mode-new">
-          <label>Project name<input id="f-name" placeholder="e.g. Cozy Recipes App"></label>
-          <label>Create it inside<input id="f-parent" class="mono"></label>
+    <ol class="steps-bar" id="steps-bar">
+      <li data-step="1"><span>1</span>Project</li>
+      <li data-step="2"><span>2</span>Team</li>
+      <li data-step="3"><span>3</span>Rules <small>optional</small></li>
+    </ol>
+    <div class="dlg-body wizard-body">
+      <section class="step" data-step="1">
+        <div class="seg big" id="dlg-mode"><button type="button" data-m="new" class="on">Make a new folder</button><button type="button" data-m="existing">Use a folder I already have</button></div>
+        <div id="mode-new" class="step-fields">
+          <label>Project name<input id="f-name" placeholder="e.g. Cozy Recipes App" maxlength="80"></label>
+          <label>Create it inside
+            <div class="path-row"><input id="f-parent" class="mono" spellcheck="false"><button type="button" class="btn" id="pick-parent">Browse…</button></div></label>
         </div>
-        <div id="mode-existing" hidden>
-          <label>Folder<input id="f-existing" class="mono" placeholder="C:\Users\…\Desktop\My App"></label>
+        <div id="mode-existing" class="step-fields" hidden>
+          <label>Folder
+            <div class="path-row"><input id="f-existing" class="mono" spellcheck="false" placeholder="Choose the project's folder"><button type="button" class="btn" id="pick-existing">Browse…</button></div></label>
+          <label>Project name<input id="f-existing-name" placeholder="The folder's name" maxlength="80"></label>
           <label class="check"><input type="checkbox" id="f-link" checked> Add a short “Team” note to this folder’s AGENTS.md / CLAUDE.md (if they exist)</label>
         </div>
+        <p class="where-preview" id="where-preview"></p>
       </section>
 
-      <section>
-        <h3>Team members <span class="muted" id="member-count"></span></h3>
-        <p class="muted small">Add as many Claude and Codex members as you like (e.g. two Codex designers and a Claude builder). Each gets its own chat, roles and model; different members can work at the same time.</p>
-        <div class="agents" id="f-agents"></div>
-        <div class="add-row"><button type="button" class="btn" id="add-claude"><span class="dot claude"></span>Add a Claude member</button>
-          <button type="button" class="btn" id="add-codex"><span class="dot codex"></span>Add a Codex member</button>
-          <button type="button" class="btn" id="add-cursor"><span class="dot cursor"></span>Add a Cursor member</button>
-          <button type="button" class="btn" id="add-antigravity"><span class="dot antigravity"></span>Add an Antigravity member</button></div>
-        <div class="grid2">
+      <section class="step" data-step="2" hidden>
+        <div class="step-head"><h3>Team <span class="muted" id="member-count"></span></h3>
+          <button type="button" class="btn primary" id="add-member">＋ Add member</button></div>
+        <p class="muted small">Each member is one agent with its own chat, model and roles. Mix any agents you like; different members can work at the same time.</p>
+        <table class="team-table">
+          <thead><tr><th>Member</th><th>Agent</th><th>Model</th><th>Roles</th><th></th></tr></thead>
+          <tbody id="team-rows"></tbody>
+        </table>
+      </section>
+
+      <section class="step" data-step="3" hidden>
+        <div class="rules">
           <label>Your role<input id="f-human" placeholder="Lead — sets goals and approves the results"></label>
-          <label>Start a fresh agent chat every … requests (saves tokens; 0 = never)<input id="f-fresh" type="number" min="0" max="50"></label>
-        </div>
-        <label>Coordinator — reads your channel messages, sharpens everyone's orders and sends each to the member who fits best
-          <select id="f-coordinator"></select></label>
-        <label>Referee — steps in when a hand-off chain runs long: drops loops and duplicates, sends on only what's needed
-          <select id="f-referee"></select></label>
-        <label>Supervisor — watches every order; restarts stuck ones, retries failures once, then diagnoses and fixes what still fails
-          <select id="f-supervisor"></select></label>
-      </section>
-
-      <section>
-        <h3>Share skills between the agents <span class="muted" id="share-count"></span></h3>
-        <p class="muted small">Copies the picked skills into this project only (Codex reads <code>.agents/skills</code>, Claude reads <code>.claude/skills</code>). Your global setup is not changed.</p>
-        <div class="share">
-          <div class="share-col"><div class="share-head"><span class="dot claude"></span>Claude’s skills → give to Codex</div>
-            <input class="share-search" data-for="codex" placeholder="Search…"><div class="share-list" id="share-codex"></div></div>
-          <div class="share-col"><div class="share-head"><span class="dot codex"></span>Codex’s skills → give to Claude</div>
-            <input class="share-search" data-for="claude" placeholder="Search…"><div class="share-list" id="share-claude"></div></div>
+          <label>Fresh chat every … requests <small class="muted">saves tokens · 0 = never</small><input id="f-fresh" type="number" min="0" max="50"></label>
+          <label>Producer <small class="muted">reads your channel messages and sends each order to the member who fits</small><select id="f-coordinator"></select></label>
+          <label>Referee <small class="muted">steps in when a hand-off chain runs long</small><select id="f-referee"></select></label>
+          <label>Supervisor <small class="muted">fixes orders that fail or get stuck</small><select id="f-supervisor"></select></label>
+          <div class="rule-skills"><b>Shared skills</b> <span class="muted" id="share-count">none</span>
+            <p class="muted small">Copy some Claude skills to Codex, or the other way round, for this project only.</p>
+            <button type="button" class="btn" id="open-skills">Choose skills…</button></div>
         </div>
       </section>
-      <label class="check"><input type="checkbox" id="f-open-codex" checked> Open the project in the Codex app afterwards</label>
     </div>
     <footer class="dlg-foot">
       <span class="dlg-err" id="dlg-err"></span>
       <button type="button" class="btn" id="dlg-cancel">Cancel</button>
+      <button type="button" class="btn" id="dlg-back">Back</button>
+      <button type="button" class="btn" id="dlg-next">Next</button>
       <button type="submit" class="btn primary" id="dlg-save">Create project</button>
     </footer>
   </form>
 </dialog>
+<dialog class="dialog member-dialog" id="member-dialog">
+  <div class="dlg-head"><img id="m-pic" src="assets/icon-team-room.png" alt="">
+    <div><h2 id="m-title">Add a member</h2><p id="m-sub">Pick the agent, give it a name and a model. Roles and the rest can wait.</p></div>
+    <button type="button" class="dlg-x" id="m-close" title="Close">✕</button></div>
+  <div class="dlg-body">
+    <div class="agent-tiles" id="m-apps"></div>
+    <div class="grid2">
+      <label>Name<input id="m-name" maxlength="40" placeholder="e.g. Designer"></label>
+      <label>Model<select id="m-model"></select></label>
+    </div>
+    <p class="dlg-err" id="m-install" hidden></p>
+    <details id="m-more"><summary>Roles, colour and permissions</summary>
+      <label>Roles — pick as many as you like<div class="chips" id="m-roles"></div></label>
+      <label>Your own roles<textarea id="m-own" rows="2" placeholder="More roles, one per line — e.g. “Make the sound effects”"></textarea></label>
+      <label>Colour<div class="shades" id="m-shades"></div></label>
+      <label class="check"><input type="checkbox" id="m-manual"> Works in my own app — don’t start it in the background</label>
+      <label class="check" id="m-shell-row"><input type="checkbox" id="m-shell"> Can run commands — checks, builds, renders (common destructive commands are refused)</label>
+      <p class="muted small" id="m-notes"></p>
+    </details>
+  </div>
+  <div class="dlg-foot"><span class="dlg-err" id="m-err"></span>
+    <button type="button" class="btn" id="m-cancel">Cancel</button><button type="button" class="btn primary" id="m-save">Add member</button></div>
+</dialog>
+
+<dialog class="dialog" id="skills-dialog">
+  <div class="dlg-head"><img src="assets/icon-team-room.png" alt=""><div><h2>Share skills in this project</h2>
+    <p>Copies the picked skills into this project only (Codex reads <code>.agents/skills</code>, Claude reads <code>.claude/skills</code>). Your global setup is not changed.</p></div>
+    <button type="button" class="dlg-x" id="skills-close" title="Close">✕</button></div>
+  <div class="dlg-body">
+    <div class="share">
+      <div class="share-col"><div class="share-head"><span class="dot claude"></span>Claude’s skills → give to Codex</div>
+        <input class="share-search" data-for="codex" placeholder="Search…"><div class="share-list" id="share-codex"></div></div>
+      <div class="share-col"><div class="share-head"><span class="dot codex"></span>Codex’s skills → give to Claude</div>
+        <input class="share-search" data-for="claude" placeholder="Search…"><div class="share-list" id="share-claude"></div></div>
+    </div>
+  </div>
+  <div class="dlg-foot"><button type="button" class="btn primary" id="skills-done">Done</button></div>
+</dialog>
+
 <dialog class="dialog small-dialog" id="choice">
   <div class="dlg-head"><img src="assets/icon-retry.png" alt=""><div><h2 id="choice-title"></h2></div></div>
   <div class="dlg-body" id="choice-text"></div>

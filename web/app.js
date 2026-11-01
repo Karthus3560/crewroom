@@ -682,179 +682,285 @@ async function renderTeamCard(p) {
 }
 
 let setupInfo = null;
-let dialogMode = 'new';
-let editing = null;
+// The New project / Edit team wizard. The team lives in `draft` (not in the page) until you press Create or Save.
+const draft = { step: 1, mode: 'new', members: [], editing: null, shared: { codex: new Set(), claude: new Set() } };
+const ROLE_TITLE = (r) => r.split(' — ')[0];
+
 async function openProjectDialog(opts = {}) {
   const dlg = $('#project-dialog');
   $('#dlg-err').textContent = '';
+  if (!dlg.open) dlg.showModal();
   if (!setupInfo) {
-    $('#dlg-save').disabled = true;
-    dlg.showModal();
+    $('#dlg-save').disabled = $('#dlg-next').disabled = true;
     try { setupInfo = await api('setup-info'); } catch (e) { $('#dlg-err').textContent = e.message; return; }
-    $('#dlg-save').disabled = false;
-  } else if (!dlg.open) dlg.showModal();
-  editing = opts.edit || null;
-  const st = editing ? editing.settings : {};
-  const shared = st.shared || {};
-  const team = st.members || ['claude', 'codex'].map((app) => ({ app, name: app === 'claude' ? 'Claude' : 'Codex', ...setupInfo.defaults[app] }));
-  $('#dlg-title').textContent = editing ? `Team for ${editing.name}` : 'New project';
-  $('#dlg-sub').textContent = editing ? editing.root : 'Make a folder and set up who does what. Every team chat for it lives in that folder.';
-  $('#where').hidden = !!editing;
-  $('#f-open-codex').closest('label').hidden = !!editing;
-  $('#dlg-save').textContent = editing ? 'Save team' : 'Create project';
+    $('#dlg-save').disabled = $('#dlg-next').disabled = false;
+  }
+  const edit = opts.edit || null;
+  const st = edit ? edit.settings : {};
+  draft.editing = edit;
+  draft.members = (st.members || ['claude', 'codex'].map((app) => ({ app, name: APP_NAMES[app], ...setupInfo.defaults[app] })))
+    .map((m) => ({ ...m, roles: [...(m.roles || [])], hue: m.hue ?? 0 }));
+  draft.shared = { codex: new Set((st.shared || {}).codex || []), claude: new Set((st.shared || {}).claude || []) };
+  $('#dlg-title').textContent = edit ? `Team for ${edit.name}` : 'New project';
+  $('#dlg-sub').textContent = edit ? edit.root : 'Pick a folder, hire your team, then set the rules. You can change the team later.';
+  $('#steps-bar li[data-step="1"]').hidden = !!edit;
   setMode(opts.existing ? 'existing' : 'new');
   $('#f-name').value = opts.name && !opts.existing ? opts.name : '';
   $('#f-parent').value = setupInfo.desktop;
   $('#f-existing').value = opts.existing || '';
+  $('#f-existing-name').value = opts.existing ? (opts.name || folderName(opts.existing)) : '';
   $('#f-human').value = st.humanRole || setupInfo.humanRole;
   $('#f-fresh').value = st.freshEvery ?? setupInfo.freshEvery;
-  $('#f-agents').replaceChildren(...team.map((m) => agentCard(m)));
-  for (const a of setupInfo.apps || []) {
-    const b = $('#add-' + a.id);
-    if (b) b.title = a.found ? `Add a ${a.name} member` : `${a.name} isn't installed yet: ${a.install}`;
-  }
-  countMembers();
-  refreshCoordinator(st.coordinator || '', st.referee || '', st.supervisor || '');
-  for (const target of ['codex', 'claude']) {
-    const source = target === 'codex' ? 'claude' : 'codex';
-    const chosen = new Set(shared[target] || []);
-    $('#share-' + target).replaceChildren(...setupInfo.skills[source].filter((sk) => sk.name !== 'team-chat').map((sk) =>
-      el('label', { class: 'skill', title: sk.description, 'data-name': sk.name.toLowerCase() + ' ' + sk.description.toLowerCase() },
-        el('input', { type: 'checkbox', value: sk.name, checked: chosen.has(sk.name), onchange: countShared }),
-        el('b', {}, sk.name), el('small', {}, sk.description || ''))));
-  }
-  document.querySelectorAll('.share-search').forEach((i) => { i.value = ''; });
+  draft.roles = { coordinator: st.coordinator || '', referee: st.referee || '', supervisor: st.supervisor || '' };
+  renderTeamRows();
   countShared();
-  (editing ? $('#f-agents .chip-role') : opts.existing ? $('#f-existing') : $('#f-name')).focus();
+  goStep(edit || opts.existing ? 2 : 1);
 }
-let cardSeq = 0;
-function agentCard(m) {
-  const app = m.app;
-  const key = 'm' + (++cardSeq);
-  const models = setupInfo.models[app];
-  const current = m.roles || [];
-  const chips = el('div', { class: 'chips' }, setupInfo.presets.map((t) => {
-    const [title, desc] = t.split(' — ');
-    return el('button', { type: 'button', class: 'chip-role' + (current.includes(t) ? ' on' : ''), 'data-role-value': t, title: desc || t,
-      onclick: (e) => e.currentTarget.classList.toggle('on') }, title);
-  }));
-  const custom = current.filter((x) => !setupInfo.presets.includes(x));
-  const name = el('input', { class: 'name-input', oninput: () => refreshCoordinator(), value: m.name || '', placeholder: { codex: 'e.g. Designer', cursor: 'e.g. Refactorer', antigravity: 'e.g. Researcher' }[app] || 'e.g. Builder', maxlength: 40 });
-  const hue = m.hue ?? (m.id ? member(m.id).hue : undefined) ?? nextHue(app);
-  const pic = avatar(app, false, hue);
-  const shades = el('div', { class: 'shades' }, (setupInfo.hues || [0]).map((h) => el('button', {
-    type: 'button', class: 'shade' + (h === hue ? ' on' : ''), title: h ? `Shade ${h}°` : 'Original colour', 'data-hue': h,
-    onclick: (e) => {
-      card.dataset.hue = h;
-      shades.querySelectorAll('.shade').forEach((b) => b.classList.toggle('on', b === e.currentTarget));
-      pic.style.filter = h ? `hue-rotate(${h}deg)` : '';
-    } }, el('img', { src: member(app).avatar || '', alt: '', style: tint(h) }))));
-  const card = el('div', { class: 'agent-card ' + app, 'data-app': app, 'data-key': key, 'data-hue': hue },
-    el('button', { type: 'button', class: 'remove', title: 'Remove this member', onclick: () => {
-      if (document.querySelectorAll('#f-agents .agent-card').length < 2) return toast('Keep at least one member', true);
-      card.remove(); countMembers();
-    } }, '✕'),
-    el('div', { class: 'agent-top' }, pic, el('div', { style: 'flex:1;min-width:0;margin-right:22px' }, name,
-      el('span', {}, appInfo(app).blurb || APP_NAMES[app]))),
-    el('label', {}, 'Colour', shades),
-    el('label', {}, 'Roles — pick as many as you like', chips),
-    el('label', {}, 'Your own roles', el('textarea', { rows: 2, class: 'own-roles', placeholder: 'More roles, one per line — e.g. “Make the sound effects”' }, custom.join('\n'))),
-    el('label', {}, 'Model', el('select', { class: 'model' }, (models || [{ id: '', name: 'Default' }]).map((x) => el('option', { value: x.id, selected: x.id === (m.model || '') }, x.name)))),
-    appInfo(app).found === false ? el('div', { class: 'dlg-err', style: 'font-size:12px' }, `${APP_NAMES[app]} isn't installed on this computer yet. ${appInfo(app).install || ''}`) : null,
-    appInfo(app).liveNotes ? null : el('div', { class: 'muted', style: 'font-size:12px' }, `Notes you send while ${APP_NAMES[app]} works reach it right after it finishes (as a follow-up).`),
-    el('label', { class: 'check', title: 'Use for the agent you chat with yourself (e.g. your open Claude Code session)' },
-      el('input', { type: 'checkbox', class: 'manual', checked: !!m.manual }), 'Works in my own app — don’t start it in the background'),
-    appInfo(app).shell ? el('label', { class: 'check', title: 'Lets this member run checks, builds, snapshots and renders itself. Deleting folders, git push/reset and system changes stay blocked.' },
-      el('input', { type: 'checkbox', class: 'shell', checked: !!m.shell }), 'Can run commands — checks, builds, renders (common destructive commands are refused; a guard-rail, not a sandbox)')
-      : el('div', { class: 'muted', style: 'font-size:12px' }, 'Codex runs commands in its own sandbox.'));
-  return card;
+const folderName = (p) => String(p).replace(/[\\/]+$/, '').split(/[\\/]/).pop() || '';
+
+// ---- steps ----
+function goStep(n) {
+  draft.step = n;
+  document.querySelectorAll('#project-dialog .step').forEach((s) => { s.hidden = Number(s.dataset.step) !== n; });
+  document.querySelectorAll('#steps-bar li').forEach((li) => {
+    const s = Number(li.dataset.step);
+    li.classList.toggle('on', s === n);
+    li.classList.toggle('done', s < n);
+  });
+  const first = draft.editing ? 2 : 1;
+  $('#dlg-back').hidden = n === first;
+  $('#dlg-next').hidden = n === 3;
+  $('#dlg-next').textContent = n === 1 ? 'Next: team' : 'Next: rules';
+  $('#dlg-next').classList.toggle('primary', n === 1);  // step 2 also has Create, which is the main button there
+  $('#dlg-save').hidden = n === 1;
+  $('#dlg-save').textContent = draft.editing ? 'Save team' : 'Create project';
+  $('#dlg-err').textContent = '';
+  if (n === 3) refreshRoles();
+  if (n === 1) updateWhere();
+  ($('#project-dialog .step:not([hidden]) input, #project-dialog .step:not([hidden]) button') || $('#dlg-next')).focus();
 }
-function membersFromDialog() {
-  return [...document.querySelectorAll('#f-agents .agent-card')].map((card) => ({
-    app: card.dataset.app,
-    name: card.querySelector('.name-input').value.trim(),
-    roles: [...card.querySelectorAll('.chip-role.on')].map((b) => b.dataset.roleValue)
-      .concat(card.querySelector('.own-roles').value.split('\n').map((x) => x.trim()).filter(Boolean)),
-    model: card.querySelector('select.model').value,
-    hue: Number(card.dataset.hue || 0),
-    manual: card.querySelector('.manual').checked,
-    shell: !!card.querySelector('.shell')?.checked,
-  }));
+function stepError(n) {
+  if (n === 1) {
+    if (draft.mode === 'new') {
+      const name = $('#f-name').value.trim();
+      if (!name) return 'Give the project a name';
+      if (/[<>:"/\\|?*]/.test(name)) return 'A project name can’t contain < > : " / \\ | ? *';
+      if (!$('#f-parent').value.trim()) return 'Choose where to make the folder';
+    } else if (!$('#f-existing').value.trim()) return 'Choose the project’s folder';
+  }
+  if (n >= 2) {
+    if (!draft.members.length) return 'Add at least one member';
+    const bad = draft.members.find((m) => !m.name.trim() || !m.roles.length);
+    if (bad) return bad.name.trim() ? `Give ${bad.name} at least one role (Edit)` : 'Every member needs a name';
+    const ids = draft.members.map((m) => memberId(m.app, m.name));
+    const dup = ids.find((id, i) => ids.indexOf(id) !== i);
+    if (dup) return 'Two members have the same name; rename one';
+  }
+  return '';
 }
-function nextHue(app) {
-  const used = new Set([...document.querySelectorAll(`#f-agents .agent-card[data-app=${app}]`)].map((c) => Number(c.dataset.hue)));
-  return (setupInfo.hues || [0]).find((h) => !used.has(h)) ?? 0;
+$('#dlg-next').onclick = () => {
+  const err = stepError(draft.step);
+  if (err) { $('#dlg-err').textContent = err; return; }
+  goStep(draft.step + 1);
+};
+$('#dlg-back').onclick = () => goStep(draft.step - 1);
+document.querySelectorAll('#steps-bar li').forEach((li) => li.addEventListener('click', () => {
+  const to = Number(li.dataset.step);
+  if (to === draft.step || li.hidden) return;
+  for (let s = draft.step; s < to; s++) { const err = stepError(s); if (err) { $('#dlg-err').textContent = err; return; } }
+  goStep(to);
+}));
+
+// ---- step 1: where ----
+function setMode(m) {
+  draft.mode = m;
+  document.querySelectorAll('#dlg-mode button').forEach((b) => b.classList.toggle('on', b.dataset.m === m));
+  $('#mode-new').hidden = m !== 'new';
+  $('#mode-existing').hidden = m !== 'existing';
+  updateWhere();
+}
+function updateWhere() {
+  const sep = String($('#f-parent').value).includes('/') ? '/' : '\\';
+  $('#where-preview').textContent = draft.mode === 'new'
+    ? ($('#f-name').value.trim() ? `Crewroom will make the folder ${$('#f-parent').value.replace(/[\\/]+$/, '')}${sep}${$('#f-name').value.trim()}` : '')
+    : ($('#f-existing').value.trim() ? `The team will work in ${$('#f-existing').value.trim()}` : '');
+}
+document.querySelectorAll('#dlg-mode button').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.m)));
+['#f-name', '#f-parent', '#f-existing'].forEach((s) => $(s).addEventListener('input', updateWhere));
+$('#f-existing').addEventListener('change', () => { if (!$('#f-existing-name').value.trim()) $('#f-existing-name').value = folderName($('#f-existing').value); });
+async function browse(input, title, after) {
+  const btn = document.activeElement;
+  if (btn) btn.disabled = true;
+  toast('The folder picker opened — it may be behind this window');
+  try {
+    const r = await api('pick-folder', { start: input.value.trim(), title });
+    if (r.path) { input.value = r.path; after && after(r.path); updateWhere(); }
+  } catch (e) { toast(e.message, true); } finally { if (btn) btn.disabled = false; }
+}
+$('#pick-parent').onclick = () => browse($('#f-parent'), 'Where should Crewroom make the project folder?');
+$('#pick-existing').onclick = () => browse($('#f-existing'), 'Choose the project folder', (p) => { $('#f-existing-name').value = folderName(p); });
+
+// ---- step 2: the team table ----
+const modelName = (m) => ((setupInfo.models[m.app] || []).find((x) => x.id === (m.model || '')) || {}).name || m.model || 'Default';
+function renderTeamRows() {
+  const rows = draft.members.map((m, i) => el('tr', {},
+    el('td', {}, el('div', { class: 'who' }, avatar(m.app, true, m.hue), el('b', {}, m.name),
+      m.manual ? el('span', { class: 'tag', title: 'Works in its own app' }, 'OWN APP') : null,
+      m.shell ? el('span', { class: 'tag', title: 'Can run commands' }, 'CMD') : null)),
+    el('td', {}, el('span', { class: 'dot ' + m.app }), ' ', APP_NAMES[m.app] || m.app),
+    el('td', { class: 'model-cell', title: modelName(m) }, modelName(m)),
+    el('td', {}, el('div', { class: 'role-chips' }, m.roles.length ? m.roles.slice(0, 3).map((r) => el('span', { class: 'chip-role on ' + m.app, title: r }, ROLE_TITLE(r)))
+      .concat(m.roles.length > 3 ? [el('span', { class: 'muted' }, `+${m.roles.length - 3}`)] : []) : [el('span', { class: 'dlg-err' }, 'needs a role')])),
+    el('td', { class: 'row-actions' }, el('button', { type: 'button', class: 'btn', onclick: () => openMember(i) }, 'Edit'),
+      el('button', { type: 'button', class: 'btn danger', title: 'Remove', onclick: () => {
+        if (draft.members.length < 2) return toast('Keep at least one member', true);
+        draft.members.splice(i, 1); renderTeamRows();
+      } }, '✕'))));
+  $('#team-rows').replaceChildren(...rows);
+  const per = Object.keys(APP_NAMES).map((a) => [APP_NAMES[a], draft.members.filter((m) => m.app === a).length]).filter(([, n]) => n);
+  $('#member-count').textContent = `· ${draft.members.length} member${draft.members.length === 1 ? '' : 's'}` +
+    (per.length ? ` (${per.map(([n, c]) => `${c} ${n}`).join(', ')})` : '');
 }
 function memberId(app, name) {
   const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30);
   return !slug || slug === app ? app : `${app}-${slug}`;
 }
-function refreshCoordinator(selected, selectedReferee, selectedSupervisor) {
-  const options = membersFromDialog().filter((m) => m.name).map((m) => [memberId(m.app, m.name), `${m.name} (${APP_NAMES[m.app] || m.app})`]);
-  for (const [sel, keep, none] of [[$('#f-coordinator'), selected, 'None — I route work myself'],
-                                   [$('#f-referee'), selectedReferee, 'None — long chains wait for my OK'],
-                                   [$('#f-supervisor'), selectedSupervisor, 'None — Crewroom only restarts and retries']]) {
-    const value = keep ?? sel.value;
+function freeHue(app, except = -1) {
+  const used = new Set(draft.members.filter((m, i) => m.app === app && i !== except).map((m) => Number(m.hue || 0)));
+  return (setupInfo.hues || [0]).find((h) => !used.has(h)) ?? 0;  // the first member of an agent keeps its true colours
+}
+$('#add-member').onclick = () => openMember(-1);
+
+// ---- the member pop-up (add and edit) ----
+let editingMember = -1;
+let memberDraft = null;
+function openMember(i) {
+  editingMember = i;
+  memberDraft = i >= 0 ? { ...draft.members[i], roles: [...draft.members[i].roles] } : { app: 'claude', name: '', model: '', roles: [], hue: 0 };
+  $('#m-title').textContent = i >= 0 ? `Edit ${memberDraft.name}` : 'Add a member';
+  $('#m-sub').textContent = i >= 0 ? 'Change anything; it applies when you save the team.' : 'Pick the agent, give it a name and a model. Roles and the rest can wait.';
+  $('#m-save').textContent = i >= 0 ? 'Save member' : 'Add member';
+  $('#m-err').textContent = '';
+  $('#m-more').open = i >= 0;
+  $('#m-apps').hidden = i >= 0;
+  if (i < 0) pickApp(firstFoundApp(), true); else fillMember();
+  $('#member-dialog').showModal();
+  $('#m-name').focus();
+}
+const firstFoundApp = () => ((setupInfo.apps || []).find((a) => a.found) || { id: 'claude' }).id;
+function pickApp(app, fresh) {
+  memberDraft.app = app;
+  if (fresh || !memberDraft.roles.length) memberDraft.roles = [...((setupInfo.defaults[app] || {}).roles || [])];
+  const n = draft.members.filter((m) => m.app === app).length;
+  if (fresh || !memberDraft.name || Object.values(APP_NAMES).some((b) => memberDraft.name.startsWith(b))) memberDraft.name = n ? `${APP_NAMES[app]} ${n + 1}` : APP_NAMES[app];
+  memberDraft.model = '';
+  memberDraft.hue = freeHue(app);
+  memberDraft.shell = false;
+  fillMember();
+}
+function fillMember() {
+  const m = memberDraft;
+  const info = appInfo(m.app);
+  $('#m-apps').replaceChildren(...(setupInfo.apps || []).map((a) => el('button', { type: 'button',
+    class: 'agent-tile ' + a.id + (a.id === m.app ? ' on' : '') + (a.found ? '' : ' missing'), onclick: () => pickApp(a.id, true) },
+    avatar(a.id), el('b', {}, a.name), el('small', {}, a.blurb), a.found ? null : el('em', {}, 'not installed'))));
+  $('#m-pic').src = member(m.app).avatar || 'assets/icon-team-room.png';
+  $('#m-name').value = m.name;
+  $('#m-model').replaceChildren(...(setupInfo.models[m.app] || [{ id: '', name: 'Default' }]).map((x) => el('option', { value: x.id, selected: x.id === (m.model || '') }, x.name)));
+  $('#m-install').hidden = info.found !== false;
+  $('#m-install').textContent = info.found === false ? `${info.name} isn't installed on this computer yet. ${info.install || ''}` : '';
+  $('#m-roles').replaceChildren(...setupInfo.presets.map((t) => el('button', { type: 'button', class: 'chip-role ' + m.app + (m.roles.includes(t) ? ' on' : ''),
+    title: t.split(' — ')[1] || t, onclick: (e) => { e.currentTarget.classList.toggle('on'); } }, ROLE_TITLE(t))));
+  $('#m-own').value = m.roles.filter((r) => !setupInfo.presets.includes(r)).join('\n');
+  $('#m-shades').replaceChildren(...(setupInfo.hues || [0]).map((h) => el('button', { type: 'button', class: 'shade' + (h === Number(m.hue || 0) ? ' on' : ''),
+    title: h ? `Shade ${h}°` : 'True colours', onclick: (e) => {
+      memberDraft.hue = h;
+      $('#m-shades').querySelectorAll('.shade').forEach((b) => b.classList.toggle('on', b === e.currentTarget));
+    } }, el('img', { src: member(m.app).avatar || '', alt: '', style: tint(h) }))));
+  $('#m-manual').checked = !!m.manual;
+  $('#m-shell-row').hidden = !info.shell;
+  $('#m-shell').checked = !!m.shell;
+  $('#m-notes').textContent = info.liveNotes === false ? `Notes you send while ${info.name} works reach it right after it finishes (as a follow-up).` : '';
+}
+function saveMember() {
+  const m = memberDraft;
+  m.name = $('#m-name').value.trim();
+  m.model = $('#m-model').value;
+  m.roles = [...$('#m-roles').querySelectorAll('.chip-role.on')].map((b) => setupInfo.presets.find((t) => ROLE_TITLE(t) === b.textContent))
+    .concat($('#m-own').value.split('\n').map((x) => x.trim()).filter(Boolean));
+  m.manual = $('#m-manual').checked;
+  m.shell = appInfo(m.app).shell && $('#m-shell').checked;
+  if (!m.name) { $('#m-err').textContent = 'Give the member a name'; return; }
+  if (!m.roles.length) { $('#m-more').open = true; $('#m-err').textContent = 'Pick at least one role'; return; }
+  const id = memberId(m.app, m.name);
+  if (draft.members.some((o, i) => i !== editingMember && memberId(o.app, o.name) === id)) { $('#m-err').textContent = 'Another member already has this name'; return; }
+  if (editingMember >= 0) draft.members[editingMember] = m; else draft.members.push(m);
+  $('#member-dialog').close();
+  renderTeamRows();
+}
+$('#m-save').onclick = saveMember;
+$('#m-name').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); saveMember(); } });
+$('#m-close').onclick = $('#m-cancel').onclick = () => $('#member-dialog').close();
+
+// ---- step 3: rules and shared skills ----
+function refreshRoles() {
+  const options = draft.members.map((m) => [memberId(m.app, m.name), `${m.name} (${APP_NAMES[m.app] || m.app})`]);
+  for (const [key, none] of [['coordinator', 'None — I route work myself'], ['referee', 'None — long chains wait for my OK'],
+                             ['supervisor', 'None — Crewroom only restarts and retries']]) {
+    const sel = $('#f-' + key);
+    const value = options.some(([id]) => id === draft.roles[key]) ? draft.roles[key] : '';
     sel.replaceChildren(el('option', { value: '' }, none), ...options.map(([id, label]) => el('option', { value: id, selected: id === value }, label)));
+    sel.onchange = () => { draft.roles[key] = sel.value; };
   }
 }
-function countMembers() {
-  refreshCoordinator();
-  const cards = [...document.querySelectorAll('#f-agents .agent-card')];
-  const per = APP_IDS.map((a) => [APP_NAMES[a], cards.filter((x) => x.dataset.app === a).length]).filter(([, n]) => n);
-  $('#member-count').textContent = `· ${cards.length} member${cards.length > 1 ? 's' : ''} (${per.map(([n, c]) => `${c} ${n}`).join(', ')})`;
-}
-function addMember(app) {
-  const n = document.querySelectorAll(`#f-agents .agent-card[data-app=${app}]`).length;
-  const base = APP_NAMES[app] || app;
-  const card = agentCard({ app, name: n ? `${base} ${n + 1}` : base, roles: [] });
-  $('#f-agents').append(card);
-  countMembers();
-  card.querySelector('.name-input').select();
-  card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-}
-$('#add-claude').onclick = () => addMember('claude');
-$('#add-codex').onclick = () => addMember('codex');
-$('#add-cursor').onclick = () => addMember('cursor');
-$('#add-antigravity').onclick = () => addMember('antigravity');
-function setMode(m) {
-  dialogMode = m;
-  document.querySelectorAll('#dlg-mode button').forEach((b) => b.classList.toggle('on', b.dataset.m === m));
-  $('#mode-new').hidden = m !== 'new';
-  $('#mode-existing').hidden = m !== 'existing';
-}
 function countShared() {
-  const a = document.querySelectorAll('#share-codex input:checked').length;
-  const b = document.querySelectorAll('#share-claude input:checked').length;
-  $('#share-count').textContent = a + b ? `· ${a} to Codex, ${b} to Claude` : '';
+  const a = draft.shared.codex.size, b = draft.shared.claude.size;
+  $('#share-count').textContent = a + b ? `· ${a} to Codex, ${b} to Claude` : '· none';
 }
-document.querySelectorAll('#dlg-mode button').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.m)));
+$('#open-skills').onclick = () => {
+  for (const target of ['codex', 'claude']) {
+    const source = target === 'codex' ? 'claude' : 'codex';
+    $('#share-' + target).replaceChildren(...setupInfo.skills[source].filter((sk) => sk.name !== 'team-chat').map((sk) =>
+      el('label', { class: 'skill', title: sk.description, 'data-name': sk.name.toLowerCase() + ' ' + sk.description.toLowerCase() },
+        el('input', { type: 'checkbox', value: sk.name, checked: draft.shared[target].has(sk.name),
+          onchange: (e) => { e.target.checked ? draft.shared[target].add(sk.name) : draft.shared[target].delete(sk.name); countShared(); } }),
+        el('b', {}, sk.name), el('small', {}, sk.description || ''))));
+  }
+  document.querySelectorAll('.share-search').forEach((i) => { i.value = ''; });
+  $('#skills-dialog').showModal();
+};
 document.querySelectorAll('.share-search').forEach((input) => input.addEventListener('input', () => {
   const q = input.value.trim().toLowerCase();
   document.querySelectorAll(`#share-${input.dataset.for} .skill`).forEach((row) => { row.hidden = q && !row.dataset.name.includes(q); });
 }));
+$('#skills-close').onclick = $('#skills-done').onclick = () => $('#skills-dialog').close();
+
+// ---- create / save ----
 $('#new-project').onclick = () => openProjectDialog();
 $('#dlg-close').onclick = $('#dlg-cancel').onclick = () => $('#project-dialog').close();
 $('#project-form').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const members = membersFromDialog();
-  const missing = members.find((m) => !m.name || !m.roles.length);
-  if (missing) { $('#dlg-err').textContent = missing.name ? `Give ${missing.name} at least one role` : 'Every member needs a name'; return; }
+  for (let s = draft.editing ? 2 : 1; s <= 2; s++) {
+    const err = stepError(s);
+    if (err) { goStep(s); $('#dlg-err').textContent = err; return; }
+  }
+  if (draft.step === 3) for (const k of ['coordinator', 'referee', 'supervisor']) draft.roles[k] = $('#f-' + k).value;
+  const members = draft.members.map(({ app, name, roles, model, hue, manual, shell }) => ({ app, name: name.trim(), roles, model, hue, manual: !!manual, shell: !!shell }));
+  const ids = new Set(members.map((m) => memberId(m.app, m.name)));
+  const pick = (k) => (ids.has(draft.roles[k]) ? draft.roles[k] : '');
   const team = { members, humanRole: $('#f-human').value.trim(), freshEvery: Number($('#f-fresh').value || 0),
-    coordinator: $('#f-coordinator').value, referee: $('#f-referee').value, supervisor: $('#f-supervisor').value };
-  const share = {
-    codex: [...document.querySelectorAll('#share-codex input:checked')].map((i) => i.value),
-    claude: [...document.querySelectorAll('#share-claude input:checked')].map((i) => i.value),
-  };
-  const body = editing ? { key: editing.key, ...team, share }
-    : { ...team, share, openCodex: $('#f-open-codex').checked, linkFiles: $('#f-link').checked,
-      ...(dialogMode === 'new' ? { name: $('#f-name').value.trim(), parent: $('#f-parent').value.trim() } : { existing: $('#f-existing').value.trim() }) };
+    coordinator: pick('coordinator'), referee: pick('referee'), supervisor: pick('supervisor') };
+  const share = { codex: [...draft.shared.codex], claude: [...draft.shared.claude] };
+  const body = draft.editing ? { key: draft.editing.key, ...team, share }
+    : { ...team, share, linkFiles: $('#f-link').checked,
+      ...(draft.mode === 'new' ? { name: $('#f-name').value.trim(), parent: $('#f-parent').value.trim() }
+        : { existing: $('#f-existing').value.trim(), name: $('#f-existing-name').value.trim() }) };
   $('#dlg-save').disabled = true;
   try {
-    const made = await api(editing ? 'projects/update' : 'projects', body);
+    const made = await api(draft.editing ? 'projects/update' : 'projects', body);
     settingsCache.set(made.key, made);
     $('#project-dialog').close();
-    toast(editing ? 'Team saved' : `Project “${made.name}” is ready`);
+    toast(draft.editing ? 'Team saved' : `Project “${made.name}” is ready`);
     await loadSessions(true);
     selectProject(made.key);
   } catch (err) {

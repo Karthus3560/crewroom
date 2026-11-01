@@ -255,3 +255,42 @@ def appdata_redirected():
             probe.unlink()
         except OSError:
             pass
+
+
+def pick_folder(start=None, title='Choose a folder'):
+    """Show the system's own folder picker on this computer and return the chosen path, or None if cancelled.
+    The window can't open a native dialog with a real path itself, so the Crewroom server does it for it."""
+    start = str(start or HOME)
+    try:
+        if WINDOWS:
+            # A hidden top-most owner window brings the dialog in front of the Crewroom window.
+            script = ('Add-Type -AssemblyName System.Windows.Forms; '
+                      '$o = New-Object System.Windows.Forms.Form -Property @{TopMost=$true; ShowInTaskbar=$false; Opacity=0}; '
+                      '$o.Show(); $d = New-Object System.Windows.Forms.FolderBrowserDialog; '
+                      '$d.Description = $env:CR_TITLE; $d.SelectedPath = $env:CR_START; $d.ShowNewFolderButton = $true; '
+                      'if ($d.ShowDialog($o) -eq "OK") { [Console]::OutputEncoding = [Text.Encoding]::UTF8; $d.SelectedPath }')
+            out = subprocess.run(['powershell', '-NoProfile', '-STA', '-Command', script], capture_output=True, text=True,
+                                 encoding='utf-8', errors='replace', timeout=900, env={**os.environ, 'CR_TITLE': title, 'CR_START': start},
+                                 **hidden()).stdout.strip()
+        elif MAC:
+            out = subprocess.run(['osascript', '-e', f'POSIX path of (choose folder with prompt {json_quote(title)} '
+                                  f'default location (POSIX file {json_quote(start)}))'],
+                                 capture_output=True, text=True, timeout=900).stdout.strip()
+        elif shutil.which('zenity'):
+            out = subprocess.run(['zenity', '--file-selection', '--directory', '--title', title, '--filename', start.rstrip('/') + '/'],
+                                 capture_output=True, text=True, timeout=900).stdout.strip()
+        elif shutil.which('kdialog'):
+            out = subprocess.run(['kdialog', '--getexistingdirectory', start, '--title', title],
+                                 capture_output=True, text=True, timeout=900).stdout.strip()
+        else:
+            raise OSError('No folder picker found on this computer (install zenity), so type the folder path instead.')
+    except subprocess.TimeoutExpired:
+        return None
+    out = out.splitlines()[-1].strip() if out else ''
+    return out.rstrip('/') if out and Path(out).is_dir() else None
+
+
+def json_quote(text):
+    """A string literal for AppleScript (same escaping rules as JSON for our purposes)."""
+    import json
+    return json.dumps(str(text))

@@ -124,6 +124,13 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(size) or b'{}')
         except ValueError:
             return self._error(400, 'Bad JSON')
+        if self.path == '/api/pick-folder':  # the Browse… buttons: the computer's own folder picker
+            try:
+                start = str(body.get('start') or '')
+                chosen = system.pick_folder(start if start and Path(start).is_dir() else None, str(body.get('title') or 'Choose a folder')[:120])
+            except (OSError, ValueError) as error:
+                return self._error(400, str(error))
+            return self._send(200, {'path': chosen})
         if self.path == '/api/onboarded':
             paths.DATA.mkdir(parents=True, exist_ok=True)
             ONBOARDED.write_text(__version__, encoding='utf-8')
