@@ -100,7 +100,7 @@ class Handler(BaseHTTPRequestHandler):
                 rec = status.installed() or {}
                 return self._send(200, {'ok': True, 'app': 'teamchat', 'version': __version__, 'root': str(paths.ROOT),
                                         'pid': os.getpid(), 'data': str(paths.DATA), 'installedRoot': rec.get('root'),
-                                        'installedVersion': rec.get('version'), 'uninstall': status.uninstall_hint(rec.get('root') or paths.ROOT),
+                                        'installedVersion': rec.get('version'), 'installer': rec.get('installer'), 'uninstall': status.uninstall_hint(rec.get('root') or paths.ROOT),
                                         'system': 'windows' if system.WINDOWS else 'mac' if system.MAC else 'linux'})
             return self.static(url.path)
         except KeyError:
@@ -122,6 +122,21 @@ class Handler(BaseHTTPRequestHandler):
             paths.DATA.mkdir(parents=True, exist_ok=True)
             ONBOARDED.write_text(__version__, encoding='utf-8')
             return self._send(200, {'ok': True})
+        if self.path == '/api/uninstall':  # the window's Uninstall button (macOS app, Linux package, script installs)
+            rec = status.installed() or {}
+            if rec.get('installer') == 'setup':
+                return self._error(409, 'Uninstall Crewroom from Windows Settings > Apps > Installed apps.')
+            if not status.same(rec.get('root'), paths.ROOT):  # only the installed copy may remove what it installed
+                return self._error(409, 'This copy of Crewroom is not the installed one, so it has nothing to uninstall.')
+            done = subprocess.run([sys.executable, str(paths.ROOT / 'install.py'), '--uninstall',
+                                   '--from-app' if rec.get('installer') == 'app' else '--yes'],
+                                  capture_output=True, text=True, timeout=120, **system.hidden())
+            if done.returncode != 0:
+                return self._error(500, (done.stdout + done.stderr).strip()[-400:] or 'Could not uninstall')
+            removed = remove_linux_package()
+            self._send(200, {'ok': True, 'mac': system.MAC, 'removedFolder': removed})
+            threading.Thread(target=self.server.shutdown, daemon=True).start()
+            return None
         if self.path == '/api/shutdown':  # the window's Stop button, the launcher and the installer
             self._send(200, {'ok': True})
             threading.Thread(target=self.server.shutdown, daemon=True).start()
@@ -435,6 +450,28 @@ def route_to_coordinator(mb, key, channel, text):
     return coordinator
 
 
+LINUX_HOME = Path.home() / '.local' / 'lib' / 'crewroom'  # where the Linux package installs the program
+
+
+def remove_linux_package():
+    """The Linux package lives in one folder of its own; uninstalling removes it (Linux lets a running program
+    delete its files). Never touches anything else, and never the data folder."""
+    if system.WINDOWS or system.MAC or not status.same(paths.ROOT, LINUX_HOME):
+        return None
+    import shutil
+    shutil.rmtree(paths.ROOT, ignore_errors=True)
+    return str(paths.ROOT)
+
+
+class Server(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def handle_error(self, request, client_address):
+        if isinstance(sys.exc_info()[1], (ConnectionAbortedError, ConnectionResetError, BrokenPipeError)):
+            return  # the window closed mid-answer: normal, not worth a scary log entry
+        super().handle_error(request, client_address)
+
+
 def setup_check():
     """What the welcome screen shows: are the agents and the team skill in place on this computer?"""
     def skill(rel):
@@ -464,8 +501,7 @@ def tray_status():
 
 
 def serve(port=paths.PORT):
-    httpd = ThreadingHTTPServer(('127.0.0.1', port), Handler)
-    httpd.daemon_threads = True
+    httpd = Server(('127.0.0.1', port), Handler)
     from . import supervisor
     supervisor.start_thread()
     tray = None

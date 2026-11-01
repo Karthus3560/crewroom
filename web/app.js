@@ -926,13 +926,31 @@ $('#about').onclick = async () => {
     'Stop Crewroom closes this server. Requests already running keep going; open Crewroom again to see them.',
     about.system === 'windows' ? 'Closing the window does not stop Crewroom: it keeps running in the notification area (by the clock) so your team can finish. Right-click its icon there to stop it.'
       : 'Closing the window does not stop Crewroom: it keeps running in the background so your team can finish.',
-  ].filter(Boolean), [{ label: 'Setup check', value: 'setup' }, { label: 'Stop Crewroom', value: 'stop', cls: 'danger' }, { label: 'Close', value: null, cls: 'primary' }]);
+  ].filter(Boolean), [{ label: 'Setup check', value: 'setup' },
+    about.installer && about.installer !== 'setup' ? { label: 'Uninstall…', value: 'uninstall', cls: 'danger' } : null,
+    { label: 'Stop Crewroom', value: 'stop', cls: 'danger' }, { label: 'Close', value: null, cls: 'primary' }].filter(Boolean));
   if (pick === 'setup') return showWelcome();
+  if (pick === 'uninstall') return uninstall();
   if (pick !== 'stop') return;
   try { await api('shutdown', {}); } catch { /* it closed before answering */ }
   document.body.replaceChildren(el('div', { class: 'empty', style: 'margin:20vh auto;text-align:center;font-size:15px' },
     'Crewroom is stopped. Open it again from its shortcut whenever you like. You can close this window.'));
 };
+
+async function uninstall() {
+  const sure = await choose('Uninstall Crewroom?', [
+    'This removes the team skill from Claude and Codex and stops Crewroom.',
+    `Your chats are kept in ${about.data}. Delete that folder yourself if you don't want them.`,
+  ], [{ label: 'Cancel', value: null }, { label: 'Uninstall', value: 'yes', cls: 'danger' }]);
+  if (sure !== 'yes') return;
+  let r;
+  try { r = await api('uninstall', {}); } catch (e) { toast(e.message, true); return; }
+  const last = r.mac ? 'Last step: drag Crewroom from your Applications folder to the Trash.'
+    : r.removedFolder ? 'The program is removed too.' : `You can now delete the Crewroom folder: ${about.root}`;
+  document.body.replaceChildren(el('div', { class: 'empty', style: 'margin:20vh auto;max-width:560px;text-align:center;font-size:15px;line-height:1.6' },
+    el('b', {}, 'Crewroom is uninstalled.'), el('br'), 'The team skill is removed and Crewroom has stopped. ' + last, el('br'),
+    `Your chats are still in ${about.data}. You can close this window.`));
+}
 
 // ---------- first run: what Crewroom is, and is this computer ready ----------
 async function showWelcome() {

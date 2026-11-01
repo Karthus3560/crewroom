@@ -108,6 +108,9 @@ def uninstall_hint(root):
     rec = installed() or {}
     if rec.get('installer') == 'setup':
         return 'Windows Settings > Apps > Installed apps > Crewroom > Uninstall (or Control Panel > Programs)'
+    if rec.get('installer') == 'app':
+        return ('in Crewroom, click the bottom-left corner, then Uninstall' +
+                (', and drag Crewroom from Applications to the Trash' if system.MAC else f' (or run: sh "{Path(rec["root"]) / "uninstall.sh"}")'))
     root = Path(root)
     if system.WINDOWS:
         return f'double-click uninstall.cmd in {root}'

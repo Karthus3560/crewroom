@@ -221,6 +221,11 @@ class ServerTests(unittest.TestCase):
         self.assertLessEqual(len(tip), 127)
         self.assertEqual(lines[0], f'Crewroom {__version__} is running')
 
+    def test_uninstall_refused_without_an_install_record(self):
+        code, data = self.call('/api/uninstall', {})
+        self.assertEqual(code, 409)
+        self.assertIn('not the installed one', json.loads(data)['error'])
+
     def test_unknown_attachment_is_404(self):
         self.assertEqual(self.call('/api/file/nope')[0], 404)
 
@@ -526,6 +531,24 @@ class InstallerTests(unittest.TestCase):
         return __import__('subprocess').run([sys.executable, str(paths.ROOT / 'install.py'), '--yes', '--no-open', '--home', str(home),
                                              '--desktop', str(Path(home) / 'Desktop'), *args],
                                             capture_output=True, text=True, encoding='utf-8', env=env, timeout=120)
+
+    def test_app_install_is_quiet_and_guards_against_a_second_copy(self):
+        home = Path(tempfile.mkdtemp())
+        r = self.run_installer(home, '--from-app')
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        record = json.loads((home / 'data' / 'install.json').read_text(encoding='utf-8'))
+        self.assertEqual(record['installer'], 'app')
+        self.assertIn(str(paths.ROOT / 'team.py'), (home / '.claude' / 'skills' / 'team-chat' / 'SKILL.md').read_text(encoding='utf-8'))
+        record['root'] = str(home / 'elsewhere')  # pretend the app lives somewhere else
+        (home / 'data' / 'install.json').write_text(json.dumps(record), encoding='utf-8')
+        r = self.run_installer(home)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('installed as a program', r.stdout)
+        record['root'] = str(paths.ROOT)
+        (home / 'data' / 'install.json').write_text(json.dumps(record), encoding='utf-8')
+        r = self.run_installer(home, '--uninstall', '--from-app')
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertFalse((home / '.claude' / 'skills' / 'team-chat').exists())
 
     def test_install_replaces_old_copy_then_uninstall_restores(self):
         home = Path(tempfile.mkdtemp())

@@ -28,19 +28,23 @@ You need at least one agent, signed in with your own plan: the **Claude** app ([
 2. Crewroom is now a normal program: in the Start menu and on the Desktop, and listed in **Settings → Apps → Installed apps**, where you uninstall it.
 3. **Updating:** run the newer CrewroomSetup.exe. It closes Crewroom and updates the installed program in place; it never adds a second copy. You can delete the downloaded file afterwards.
 
-### macOS and Linux
-1. You need **Python 3.10+**. macOS: [python.org](https://www.python.org/downloads/macos/) or `brew install python`. Linux: your package manager.
-2. Download the latest **[Crewroom zip](https://github.com/Karthus3560/crewroom/releases/latest/download/crewroom.zip)** and extract it. Keep the **Crewroom** folder somewhere permanent, for example `Documents`. Crewroom runs from that folder.
-3. Run the installer:
+### macOS (11 or newer)
+1. You need **Python 3.10+** from [python.org](https://www.python.org/downloads/macos/) or `brew install python`. If it's missing, Crewroom says so and offers the download.
+2. Download **Crewroom-macOS.zip** from the [latest release](https://github.com/Karthus3560/crewroom/releases/latest), open it, and drag **Crewroom** into **Applications**.
+3. Open Crewroom from Applications (or Cmd+Space, "Crewroom"). The first time, macOS may say it can't check the app: right-click Crewroom, choose **Open**, then **Open** again.
+   Each time it opens, Crewroom sets up the `team` skill for Claude and Codex.
+- **Update:** drag the new Crewroom into Applications and choose **Replace**.
+- **Uninstall:** in Crewroom click the bottom-left corner → **Uninstall**, then drag Crewroom to the Trash.
 
-   | System | Install | Uninstall |
-   |---|---|---|
-   | macOS | double-click **`Install Crewroom.command`** | double-click `Uninstall Crewroom.command` |
-   | Linux | `sh install.sh` | `sh uninstall.sh` |
-   | Windows without the exe | double-click `install.cmd` (needs Python) | double-click `uninstall.cmd` |
+### Linux
+1. You need **Python 3.10+** (Ubuntu/Debian: `sudo apt install python3`).
+2. Download **crewroom-linux.tar.gz** from the [latest release](https://github.com/Karthus3560/crewroom/releases/latest), extract it, and run `sh install.sh` inside.
+   It installs Crewroom for your user in `~/.local/lib/crewroom`, adds it to your apps menu and sets up the `team` skill.
+- **Update:** run the newer package's `install.sh`. It replaces the installed Crewroom in place.
+- **Uninstall:** in Crewroom click the bottom-left corner → **Uninstall**, or `sh ~/.local/lib/crewroom/uninstall.sh`.
 
-   It adds the `team` skill to Claude and Codex and a way to open Crewroom: **Crewroom** in Applications on macOS (Spotlight finds it), an app-menu entry on Linux.
-   macOS says it can't check the file? Right-click it, choose **Open**, then **Open** again.
+### Running from a folder (any system)
+The [Crewroom zip](https://github.com/Karthus3560/crewroom/releases/latest/download/crewroom.zip) runs from wherever you extract it (needs Python 3.10+): `install.cmd`, `Install Crewroom.command` or `sh install.sh`, and the matching uninstall. Handy for development; most people want the packages above.
 
 ### Then
 Open **Crewroom**, press **＋ New**, pick a folder, hire your crew.
@@ -66,5 +70,8 @@ Designed by **Ghaith Saad Jawad**. Built with a Crewroom crew: Claude (code, fil
 
 MIT licence.
 
-## Building the Windows installer
-`python packaging/windows/build.py` makes `dist/CrewroomSetup-<version>.exe` (needs [Inno Setup 6](https://jrsoftware.org/isinfo.php); downloads Python's embeddable package once). Keep the AppId in `packaging/windows/crewroom.iss` unchanged forever: it is what makes a new installer update the installed Crewroom instead of adding a second one.
+## Building the packages
+- Windows: `python packaging/windows/build.py` makes `dist/CrewroomSetup-<version>.exe` (needs [Inno Setup 6](https://jrsoftware.org/isinfo.php); downloads Python's embeddable package once).
+- macOS: `python packaging/macos/build.py` makes `dist/Crewroom-<version>-macOS.zip` (needs Pillow for the icon).
+- Linux: `python packaging/linux/build.py` makes `dist/crewroom-<version>-linux.tar.gz`.
+All three build on any system; the version comes from `teamchat/__init__.py`. Keep the AppId in `packaging/windows/crewroom.iss` unchanged forever: it is what makes a new installer update the installed Crewroom instead of adding a second one.
