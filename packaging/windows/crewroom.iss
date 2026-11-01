@@ -49,6 +49,7 @@ Type: filesandordirs; Name: "{app}\python"
 
 [Files]
 Source: "{#Src}\teamchat\*.py"; DestDir: "{app}\teamchat"; Flags: ignoreversion
+Source: "{#Src}\teamchat\*.ps1"; DestDir: "{app}\teamchat"; Flags: ignoreversion
 Source: "{#Src}\web\*"; DestDir: "{app}\web"; Flags: ignoreversion recursesubdirs
 Source: "{#Src}\skill\*"; DestDir: "{app}\skill"; Flags: ignoreversion recursesubdirs
 Source: "{#Src}\team.py"; DestDir: "{app}"; Flags: ignoreversion
