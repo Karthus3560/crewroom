@@ -232,6 +232,10 @@ class Mailbox:
         return dict(row) | {'settings': json.loads(row['settings'])} if row else None
 
     def saved_projects(self):
+        # Everyone who maps folders to projects reads this first, so it also hands over the folders that already had
+        # requests: a subfolder of one of them then joins that project (see projects.root_of).
+        from . import projects
+        projects.set_work_folders(r[0] for r in self.db.execute('select distinct cwd from requests where cwd is not null'))
         return [dict(r) | {'settings': json.loads(r['settings'])} for r in self.db.execute('select * from projects')]
 
     # --- starting a project's chat fresh ------------------------------------------

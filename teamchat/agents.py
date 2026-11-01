@@ -149,7 +149,7 @@ def argv(app, member, root, cwd, session, text):
         return args + [text]
     if app == 'antigravity':
         # Settings for this run only (never saved): file access always, commands only when the lead allowed them.
-        allow = ['read_file(*)', 'write_file(*)'] + (['command(*)'] if shell else [])
+        allow = ['read_file(*)', 'write_file(*)', 'generate_image(*)'] + (['command(*)'] if shell else [])
         deny = [f'command({c.strip()}*)' for c in NEVER] if shell else ['command(*)', 'unsandboxed(*)']
         args = exe + ['--output-format', 'stream-json', '--mode', 'accept-edits',
                       '--settings', json.dumps({'permissions': {'allow': allow, 'deny': deny}})]

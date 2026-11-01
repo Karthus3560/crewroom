@@ -546,6 +546,27 @@ class AgentTests(unittest.TestCase):
         mb.close()
 
 
+class GroupingTests(unittest.TestCase):
+    def test_subfolders_join_the_project_of_earlier_work(self):
+        from teamchat import projects
+        base = Path(tempfile.mkdtemp()) / 'Art' / 'avatars'
+        (base / 'v2' / 'chatgpt').mkdir(parents=True)
+        projects.set_work_folders([str(base)])
+        scratch, projects.SCRATCH = projects.SCRATCH, []  # the test folder lives in Temp, normally "Scratch & temporary"
+        try:
+            self.assertEqual(projects.root_of(str(base / 'v2' / 'chatgpt'))[1:], ('avatars', str(base)))
+            self.assertEqual(projects.root_of(str(base))[1], 'avatars')
+            (base.parent / 'TEAM.md').write_text('# Art team', encoding='utf-8')  # a marked project above wins
+            self.assertEqual(projects.root_of(str(base / 'v2' / 'chatgpt'))[1], 'Art')
+            repo = base.parent / 'tool' / 'src'
+            (repo.parent / '.git').mkdir(parents=True)
+            repo.mkdir()
+            self.assertEqual(projects.root_of(str(repo))[1], 'tool')  # the nearest marker, not the one further up
+        finally:
+            projects.set_work_folders([])
+            projects.SCRATCH = scratch
+
+
 class SystemTests(unittest.TestCase):
     def test_lock_is_exclusive_and_released(self):
         path = Path(TMP) / 'lock-test'

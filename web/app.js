@@ -218,7 +218,10 @@ function renderProjects() {
 }
 function renderTeam() {
   const busy = new Set([...state.requests.values()].filter((r) => r.status === 'working').map((r) => r.recipient));
-  const ids = ['human', ...teamOf(state.project)];
+  // Anyone with open work here shows too, even if they aren't on the project's saved team (e.g. plain "cursor").
+  const active = [...state.requests.values()].filter((r) => OPEN.includes(r.status) && (!state.project || r.project === state.project))
+    .map((r) => r.recipient).filter((id) => appOf(id) !== 'human');
+  const ids = ['human', ...new Set([...teamOf(state.project), ...active])];
   $('#team').replaceChildren(...ids.map((id) => [id, member(id)]).map(([id, m]) => el('div', { class: 'member', title: m.role },
     avatar(id, true), el('b', {}, m.name),
     id === 'human' ? null : el('span', { class: 'presence' + (busy.has(id) ? ' busy' : '') }, busy.has(id) ? 'working' : 'free'))));

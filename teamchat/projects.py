@@ -29,12 +29,17 @@ def _inside(path, folder):
     return path == folder or path.startswith(folder.rstrip('\\/') + os.sep)
 
 
-_saved = {'roots': []}
+_saved = {'roots': [], 'folders': set()}
 
 
 def set_saved_roots(rows):
     """Projects made in Team Chat win over the folder guesses below (longest path first)."""
     _saved['roots'] = sorted(((r['root'], r['name']) for r in rows), key=lambda x: len(x[0]), reverse=True)
+
+
+def set_work_folders(cwds):
+    """Folders that already had requests: a subfolder of one joins its project instead of becoming a new one."""
+    _saved['folders'] = {_norm(c) for c in cwds if c}
 
 
 def root_of(cwd):
@@ -49,6 +54,17 @@ def root_of(cwd):
         return QUICK_KEY, VIRTUAL[QUICK_KEY], None
     if any(_inside(path, s) for s in SCRATCH):
         return SCRATCH_KEY, VIRTUAL[SCRATCH_KEY], None
+    # Walk up, nearest first: a folder that already had requests (work in Art/avatars/v2 joins earlier work in
+    # Art/avatars), or a folder marked as a project (Crewroom's TEAM.md, or a git repository) is the project.
+    # The walk stops at Desktop/Documents/home and drive roots, which are never projects themselves.
+    stops = {_norm(c) for c in CONTAINERS} | {_norm(HOME)}
+    for folder in (path, *path.parents):
+        if _norm(folder) in stops or folder.parent == folder:
+            break
+        if folder != path and _norm(folder) in _saved['folders']:
+            return root_of(folder)
+        if (folder / 'TEAM.md').is_file() or (folder / '.git').exists():
+            return key(folder), folder.name, str(folder)
     for container in CONTAINERS:
         if _inside(path, container) and _norm(path) != _norm(container):
             rel = Path(os.path.relpath(path, container))
