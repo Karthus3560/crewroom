@@ -4,12 +4,11 @@ Mechanical problems are fixed here without spending tokens (a worker that died, 
 one retry of a failed order). What needs judgment goes to the project's supervisor member, an agent that
 diagnoses it and re-briefs, re-routes or asks the lead.
 """
-import ctypes
 import threading
 import time
 from datetime import datetime, timedelta, timezone
 
-from . import members as team, paths, projects, worker
+from . import members as team, paths, projects, system, worker
 from .db import Mailbox
 
 INTERVAL = 60
@@ -42,17 +41,7 @@ Then do one of these:
 Do not repeat the same order unchanged: it already failed.'''
 
 
-def alive(pid):
-    if not pid:
-        return False
-    k = ctypes.windll.kernel32
-    h = k.OpenProcess(0x1000, False, int(pid))  # PROCESS_QUERY_LIMITED_INFORMATION
-    if not h:
-        return False
-    code = ctypes.c_ulong()
-    ok = k.GetExitCodeProcess(h, ctypes.byref(code))
-    k.CloseHandle(h)
-    return bool(ok) and code.value == 259  # STILL_ACTIVE
+alive = system.alive
 
 
 def age(ts):

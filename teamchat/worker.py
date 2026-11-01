@@ -6,7 +6,6 @@ project. Codex chats are started through Codex's app server, so they show in the
 list. Requests for the same agent and project run one at a time; others wait as "queued".
 """
 import json
-import msvcrt
 import os
 import queue
 import subprocess
@@ -16,12 +15,11 @@ import time
 import uuid
 from pathlib import Path
 
-from . import paths, projects
+from . import paths, projects, system
 from . import dispatch, members as team
 from .db import Mailbox
 
-HIDDEN = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
-DETACHED = HIDDEN | getattr(subprocess, 'DETACHED_PROCESS', 0) | getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
+HIDDEN = system.hidden()  # Popen options: no console window on Windows
 SKIP_DIRS = {'.git', 'node_modules', '.venv', '__pycache__', 'bin', 'obj', 'graphify-out'}
 MEDIA = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.pdf', '.mp4', '.mp3', '.wav'}
 TIMEOUT = int(os.environ.get('TEAMCHAT_WORK_TIMEOUT', '1800'))
@@ -71,11 +69,8 @@ class Cancelled(Exception):
 
 def start(rid):
     """Launch the worker as a detached process so the asker can keep working."""
-    exe = Path(sys.executable)
-    windowless = exe.with_name('pythonw.exe')
-    exe = windowless if windowless.exists() else exe
-    proc = subprocess.Popen([str(exe), str(paths.ROOT / 'team.py'), '_work', rid], cwd=str(paths.ROOT),
-        creationflags=DETACHED, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    proc = subprocess.Popen([system.background_python(), str(paths.ROOT / 'team.py'), '_work', rid], cwd=str(paths.ROOT),
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **system.detached())
     mb = Mailbox()
     mb.link(rid, worker_pid=proc.pid)
     mb.close()
@@ -114,23 +109,15 @@ class ProjectLock:
 
     def acquire(self, should_stop):
         self.file = open(self.path, 'a+')
-        while True:
-            try:
-                msvcrt.locking(self.file.fileno(), msvcrt.LK_NBLCK, 1)
-                return
-            except OSError:
-                if should_stop():
-                    self.file.close()
-                    raise Cancelled()
-                time.sleep(2)
+        while not system.try_lock(self.file):
+            if should_stop():
+                self.file.close()
+                raise Cancelled()
+            time.sleep(2)
 
     def release(self):
         if self.file:
-            try:
-                self.file.seek(0)
-                msvcrt.locking(self.file.fileno(), msvcrt.LK_UNLCK, 1)
-            except OSError:
-                pass
+            system.unlock(self.file)
             self.file.close()
 
 
@@ -144,7 +131,7 @@ class CodexChat:
             raise RuntimeError('Codex not found. Is the Codex app installed and signed in?')
         self.log = log
         self.proc = subprocess.Popen([exe, 'app-server', '--stdio'], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL, creationflags=HIDDEN, text=True, encoding='utf-8', errors='replace')
+            stderr=subprocess.DEVNULL, **HIDDEN, text=True, encoding='utf-8', errors='replace')
         self.events, self.replies, self.seq = queue.Queue(), {}, 0
         threading.Thread(target=self._read, daemon=True).start()
         self.call('initialize', {'clientInfo': {'name': 'team_chat', 'version': '1.1'}, 'capabilities': {'experimentalApi': True}})
@@ -306,7 +293,7 @@ def run_claude(mb, req, project, cwd, prompt, log, should_stop):
     mb.link(req['id'], worker_session=session)
     text = (FIRST.format(name=member['name'], recap=project['recap']) if not known else '') + prompt
     proc = subprocess.Popen(args, cwd=root, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        creationflags=HIDDEN, text=True, encoding='utf-8', errors='replace')
+        **HIDDEN, text=True, encoding='utf-8', errors='replace')
     def user(message):
         proc.stdin.write(json.dumps({'type': 'user', 'message': {'role': 'user', 'content': message}}, ensure_ascii=False) + '\n')
         proc.stdin.flush()
@@ -362,7 +349,7 @@ def notify(req):
         try:
             r = subprocess.run([paths.find_codex(), 'queue', '--thread', req['sender_session'], '--message',
                 f"[Crewroom] {req['recipient']} finished request {req['id']} \"{req['title']}\". Run: team show {req['id']}"],
-                capture_output=True, text=True, timeout=30, creationflags=HIDDEN)
+                capture_output=True, text=True, timeout=30, **HIDDEN)
             return r.returncode == 0
         except (OSError, subprocess.SubprocessError, TypeError):
             return False

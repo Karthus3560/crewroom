@@ -353,6 +353,12 @@ function renderFeed(stick) {
         showing ? state.showOlder.delete(key) : state.showOlder.add(key); renderPanel(); renderFeed();
       } }, showing ? 'Hide older messages' : `Show ${older} older message${older > 1 ? 's' : ''}`) : null));
   }
+  const elsewhere = key && v.type !== 'request' ? state.messages.filter((m) => messageProject(m) !== key).length : 0;
+  if (key && v.type !== 'request') {  // say plainly that this is filtered, so a quiet project never looks like a broken app
+    nodes.push(el('div', { class: 'filter-bar' }, el('span', {}, `Showing only ${(projectOf(key) || {}).name || 'this project'}.`),
+      elsewhere ? el('span', {}, `${elsewhere} message${elsewhere > 1 ? 's' : ''} in other projects.`) : null,
+      el('button', { type: 'button', class: 'link-btn', onclick: () => selectProject(null) }, 'Show all activity')));
+  }
   let lastDay = '';
   for (const m of list) {
     const d = day(m.created);
@@ -897,7 +903,36 @@ $('#project-form').addEventListener('submit', async (e) => {
   } finally { $('#dlg-save').disabled = false; }
 });
 
+// ---------- which Crewroom is this ----------
+let about = null;
+async function loadAbout() {
+  try { about = await api('ping'); } catch { return; }
+  const other = about.installedRoot && about.installedRoot !== about.root;
+  const b = $('#about');
+  b.replaceChildren(el('b', {}, `Crewroom ${about.version}`), el('br'),
+    other ? 'Not the installed copy' : 'from ' + about.root.split(/[\\/]/).filter(Boolean).pop());
+  b.classList.toggle('warn', !!other);
+}
+$('#about').onclick = async () => {
+  if (!about) return;
+  const other = about.installedRoot && about.installedRoot !== about.root;
+  const pick = await choose(`Crewroom ${about.version}`, [
+    el('span', {}, 'Running from: ', el('span', { class: 'about-path' }, about.root)),
+    about.installedRoot ? el('span', {}, `Installed (${about.installedVersion}): `, el('span', { class: 'about-path' }, about.installedRoot))
+      : 'Installed: no install record. Run the installer in the folder you want to keep.',
+    other ? 'This window is not the installed copy. Open Crewroom from its shortcut to use the installed one.' : null,
+    el('span', {}, 'Your data: ', el('span', { class: 'about-path' }, about.data)),
+    `To uninstall: ${about.uninstall}. Your data is kept.`,
+    'Stop Crewroom closes this server. Requests already running keep going; open Crewroom again to see them.',
+  ].filter(Boolean), [{ label: 'Stop Crewroom', value: 'stop', cls: 'danger' }, { label: 'Close', value: null, cls: 'primary' }]);
+  if (pick !== 'stop') return;
+  try { await api('shutdown', {}); } catch { /* it closed before answering */ }
+  document.body.replaceChildren(el('div', { class: 'empty', style: 'margin:20vh auto;text-align:center;font-size:15px' },
+    'Crewroom is stopped. Open it again from its shortcut whenever you like. You can close this window.'));
+};
+
 (async function start() {
+  loadAbout();
   try { await poll(true); } catch (e) { toast('Crewroom server is not running', true); }
   await loadSessions();
   show({ type: 'room' });

@@ -2,7 +2,7 @@
 
 # Crewroom
 
-**Your AI team, together.** Crewroom turns Claude Code and OpenAI Codex into one team on your Windows PC. They hand work to each other, results land in one chat, and you lead.
+**Your AI team, together.** Crewroom turns Claude Code and OpenAI Codex into one team on your computer (Windows, macOS or Linux). They hand work to each other, results land in one chat, and you lead.
 
 ▶ **[Watch the video (2:23) and see the site](https://karthus3560.github.io/crewroom/)**
 
@@ -18,24 +18,38 @@
 - **Your rules:** Claude members run commands only if you tick *Can run commands*. Common destructive ones (git push, rm -rf, Remove-Item, registry, shutdown) are refused. It's a guard-rail, not a sandbox. Codex works inside its own workspace sandbox.
 - **One window:** projects, team chat with #general and #discussion, requests, galleries, and every agent's chat. Click a file path in a message to open it.
 
-## Install (Windows 10/11)
+## Install (Windows 10/11, macOS, Linux)
 1. You need:
-   - **Python 3.10+** from [python.org](https://www.python.org/downloads/). Tick *Add python.exe to PATH*.
-   - at least one agent, signed in with your own plan: the **Claude** app ([claude.ai/download](https://claude.ai/download); open it once and switch to the **Code** tab) and/or the **Codex** app ([chatgpt.com/codex](https://chatgpt.com/codex)).
-2. Download the latest **[Crewroom zip](https://github.com/Karthus3560/crewroom/releases/latest/download/crewroom-windows.zip)**. Right-click it, choose **Extract All**, and keep the folder somewhere permanent, for example `Documents\Crewroom`.
-3. Double-click **`install.cmd`**. It adds the `team` skill to Claude and Codex and puts a **Crewroom** shortcut on your Desktop. If Windows says *"Windows protected your PC"*, click **More info → Run anyway**. It's an unsigned script, and you can read it first.
+   - **Python 3.10+**. Windows: [python.org](https://www.python.org/downloads/), tick *Add python.exe to PATH*. macOS: [python.org](https://www.python.org/downloads/macos/) or `brew install python`. Linux: your package manager.
+   - at least one agent, signed in with your own plan: the **Claude** app ([claude.ai/download](https://claude.ai/download); open it once and switch to the **Code** tab) or Claude Code, and/or the **Codex** app ([chatgpt.com/codex](https://chatgpt.com/codex)) or Codex CLI.
+2. Download the latest **[Crewroom zip](https://github.com/Karthus3560/crewroom/releases/latest/download/crewroom.zip)** and extract it. Keep the **Crewroom** folder somewhere permanent, for example `Documents`. Crewroom runs from that folder.
+3. Run the installer for your system:
+
+   | System | Install | Uninstall |
+   |---|---|---|
+   | Windows | double-click **`install.cmd`** | double-click `uninstall.cmd` |
+   | macOS | double-click **`Install Crewroom.command`** | double-click `Uninstall Crewroom.command` |
+   | Linux | `sh install.sh` | `sh uninstall.sh` |
+
+   It adds the `team` skill to Claude and Codex and a way to open Crewroom: a Desktop and Start menu shortcut on Windows, **Crewroom** in Applications on macOS (Spotlight finds it), an app-menu entry on Linux.
+   - Windows says *"Windows protected your PC"*? Click **More info → Run anyway**.
+   - macOS says it can't check the file? Right-click it, choose **Open**, then **Open** again.
+   These are unsigned scripts, and you can read them first (`install.py` does the work).
 4. Open **Crewroom**, press **＋ New**, pick a folder, hire your crew.
 
 Then just tell an agent: *"ask Codex to make 6 cozy icons for this app and tell me when they're done."*
 
-To remove it, double-click `uninstall.cmd`. Your data in `%LOCALAPPDATA%\TeamChat` is kept.
-
-**Moved the folder or updated Python?** Double-click `install.cmd` again.
-**Window says "can't reach this page"?** See `%LOCALAPPDATA%\TeamChat\logs\server.log`. Another program may be using port 47800.
+### Updating, and knowing what's installed
+- **Already have Crewroom?** The installer tells you which version is installed and where, and asks before replacing it. Install a new version the same way; it stops the old one and takes its place.
+- **Which copy is running?** The bottom-left corner of the window shows the version and folder. Click it to see where your data is, how to uninstall, or to **Stop** Crewroom. Or run `team status`.
+- Opening Crewroom always opens the copy you clicked. If a different copy was running, it is stopped first.
+- **Moved the folder or updated Python?** Run the installer again.
+- **Uninstalling** removes the skill and the shortcut. Your chats are kept in the data folder (below).
+- **Window says "can't reach this page"?** See `logs/server.log` in the data folder. Another program may be using port 47800.
 
 ## Good to know
-- **Privacy:** it runs on your machine. The app listens on `127.0.0.1:47800` only, and your mailbox stays in `%LOCALAPPDATA%\TeamChat`. Agents use **your own** Claude and ChatGPT plans, and their work goes to those providers as usual.
-- **No packages:** Python's standard library only. The window is Microsoft Edge in app mode, or your default browser.
+- **Privacy:** it runs on your machine. The app listens on `127.0.0.1:47800` only, and your mailbox stays in the data folder: `%LOCALAPPDATA%\TeamChat` on Windows, `~/Library/Application Support/Crewroom` on macOS, `~/.local/share/crewroom` on Linux. Agents use **your own** Claude and ChatGPT plans, and their work goes to those providers as usual.
+- **No packages:** Python's standard library only. The window is Edge or Chrome in app mode, or your default browser.
 - **Reading chats:** Crewroom only *reads* the apps' own chat files (`~\.claude\projects`, `~\.codex\sessions`). When you set up a team it writes `TEAM.md` into the project and points `AGENTS.md`/`CLAUDE.md` at it.
 - **Tests:** from the Crewroom folder, `python -m unittest tests.test_team`
 

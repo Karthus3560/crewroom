@@ -16,7 +16,7 @@ TMP = tempfile.mkdtemp()
 os.environ['TEAMCHAT_DATA'] = TMP
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from teamchat import cli, paths, server, transcripts, worker  # noqa: E402
+from teamchat import __version__, cli, paths, server, status, system, transcripts, worker  # noqa: E402
 from teamchat.db import Mailbox  # noqa: E402
 
 
@@ -468,6 +468,73 @@ class MentionTests(unittest.TestCase):
         self.assertIn('also fix the seam', new['body'])
         self.assertEqual(self.started, [new['id']])
         self.assertEqual(self.mb.take_nudges(req['id']), [])
+
+class SystemTests(unittest.TestCase):
+    def test_lock_is_exclusive_and_released(self):
+        path = Path(TMP) / 'lock-test'
+        with open(path, 'a+') as a, open(path, 'a+') as b:
+            self.assertTrue(system.try_lock(a))
+            self.assertFalse(system.try_lock(b))
+            system.unlock(a)
+            self.assertTrue(system.try_lock(b))
+            system.unlock(b)
+
+    def test_alive(self):
+        self.assertTrue(system.alive(os.getpid()))
+        proc = __import__('subprocess').Popen([sys.executable, '-c', 'pass'])
+        proc.wait()
+        self.assertFalse(system.alive(proc.pid))
+        self.assertFalse(system.alive(None))
+
+    def test_version_of_folders(self):
+        self.assertEqual(status.version_of(paths.ROOT), __version__)
+        self.assertIsNone(status.version_of(Path(TMP) / 'no-such-crewroom'))
+
+
+class PingAndStopTests(unittest.TestCase):
+    def test_ping_names_this_copy_and_shutdown_stops_it(self):
+        httpd = server.ThreadingHTTPServer(('127.0.0.1', 0), server.Handler)
+        port = httpd.server_address[1]
+        done = threading.Event()
+        threading.Thread(target=lambda: (httpd.serve_forever(), done.set()), daemon=True).start()
+        info = status.ping(port)
+        self.assertEqual((info['version'], info['root'], info['pid']), (__version__, str(paths.ROOT), os.getpid()))
+        self.assertTrue(status.stop(port, wait=5))
+        self.assertTrue(done.wait(5))
+        httpd.server_close()
+        self.assertIsNone(status.ping(port))
+
+
+class InstallerTests(unittest.TestCase):
+    def run_installer(self, home, *args):
+        env = dict(os.environ, TEAMCHAT_DATA=str(Path(home) / 'data'), TEAMCHAT_PORT='47898', PYTHONIOENCODING='utf-8')
+        return __import__('subprocess').run([sys.executable, str(paths.ROOT / 'install.py'), '--yes', '--no-open', '--home', str(home),
+                                             '--desktop', str(Path(home) / 'Desktop'), *args],
+                                            capture_output=True, text=True, encoding='utf-8', env=env, timeout=120)
+
+    def test_install_replaces_old_copy_then_uninstall_restores(self):
+        home = Path(tempfile.mkdtemp())
+        mine = home / '.agents' / 'skills' / 'team-chat'
+        mine.mkdir(parents=True)
+        (mine / 'SKILL.md').write_text('a skill that is not Crewroom', encoding='utf-8')
+        old = home / '.claude' / 'skills' / 'team-chat'
+        old.mkdir(parents=True)
+        (old / 'SKILL.md').write_text('# Crewroom\npython "C:\\Old\\Crewroom\\team.py" ask', encoding='utf-8')
+        r = self.run_installer(home)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn('already installed', r.stdout)
+        self.assertIn(str(paths.ROOT / 'team.py'), (old / 'SKILL.md').read_text(encoding='utf-8'))
+        self.assertTrue((mine / 'SKILL.md.bak').exists())
+        record = json.loads((home / 'data' / 'install.json').read_text(encoding='utf-8'))
+        self.assertEqual((record['root'], record['version']), (str(paths.ROOT), __version__))
+        self.assertTrue(record['launchers'] and all(Path(l).exists() for l in record['launchers']))
+        r = self.run_installer(home, '--uninstall')
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual((mine / 'SKILL.md').read_text(encoding='utf-8'), 'a skill that is not Crewroom')
+        self.assertFalse(old.exists())
+        self.assertFalse(any(Path(l).exists() for l in record['launchers']))
+        self.assertFalse((home / 'data' / 'install.json').exists())
+
 
 if __name__ == '__main__':
     unittest.main()

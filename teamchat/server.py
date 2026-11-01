@@ -12,7 +12,7 @@ from urllib.parse import parse_qs, urlparse
 import re
 import subprocess
 
-from . import members as team, paths, projects, setup, transcripts, worker
+from . import __version__, members as team, paths, projects, setup, status, system, transcripts, worker
 from .db import OPEN, Mailbox
 
 WEB = paths.ROOT / 'web'
@@ -92,7 +92,11 @@ class Handler(BaseHTTPRequestHandler):
                 finally:
                     mb.close()
             if url.path == '/api/ping':
-                return self._send(200, {'ok': True, 'app': 'teamchat'})
+                rec = status.installed() or {}
+                return self._send(200, {'ok': True, 'app': 'teamchat', 'version': __version__, 'root': str(paths.ROOT),
+                                        'pid': os.getpid(), 'data': str(paths.DATA), 'installedRoot': rec.get('root'),
+                                        'installedVersion': rec.get('version'), 'uninstall': status.uninstall_hint(rec.get('root') or paths.ROOT),
+                                        'system': 'windows' if system.WINDOWS else 'mac' if system.MAC else 'linux'})
             return self.static(url.path)
         except KeyError:
             return self._error(404, 'Not found')
@@ -109,6 +113,10 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(size) or b'{}')
         except ValueError:
             return self._error(400, 'Bad JSON')
+        if self.path == '/api/shutdown':  # the window's Stop button, the launcher and the installer
+            self._send(200, {'ok': True})
+            threading.Thread(target=self.server.shutdown, daemon=True).start()
+            return None
         mb = mailbox()
         try:
             if self.path == '/api/ask':
@@ -167,7 +175,7 @@ class Handler(BaseHTTPRequestHandler):
                 if body.get('openCodex'):
                     exe = paths.find_codex()
                     if exe:
-                        subprocess.Popen([exe, 'app', made['root']], creationflags=worker.HIDDEN,
+                        subprocess.Popen([exe, 'app', made['root']], **worker.HIDDEN,
                                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 return self._send(200, made)
             if self.path == '/api/projects/clear':
@@ -280,11 +288,10 @@ def known_folders(mb):
 
 def _inside_known(path, mb):
     path = projects._norm(path)
-    return any(path == f or path.startswith(f.rstrip('\\') + os.sep) for f in known_folders(mb))
+    return any(path == f or path.startswith(f.rstrip('\\/') + os.sep) for f in known_folders(mb))
 
 
-def reveal(path):
-    subprocess.Popen(f'explorer /select,"{path}"')
+reveal = system.reveal
 
 
 def open_action(mb, body):
@@ -295,20 +302,20 @@ def open_action(mb, body):
             raise ValueError('That file is gone')
         if action == 'reveal-file':
             reveal(a['path'])
-            return 'Opened in File Explorer'
-        os.startfile(a['path'])
+            return f'Opened in {system.FILE_MANAGER}'
+        system.open_path(a['path'])
         return f"Opened {a['name']}"
     if action in ('folder', 'codex-app'):
         path = str(body.get('path', ''))
         if not path or not Path(path).is_dir() or not _inside_known(path, mb):
             raise ValueError('Unknown folder')
         if action == 'folder':
-            os.startfile(path)
-            return 'Opened in File Explorer'
+            system.open_path(path)
+            return f'Opened in {system.FILE_MANAGER}'
         exe = paths.find_codex()
         if not exe:
             raise ValueError('Codex is not installed')
-        subprocess.Popen([exe, 'app', path], creationflags=worker.HIDDEN,
+        subprocess.Popen([exe, 'app', path], **worker.HIDDEN,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return 'Opening this project in the Codex app'
     if action == 'claude-desktop':
@@ -320,7 +327,7 @@ def open_action(mb, body):
         exe = paths.find_claude()
         if not exe:
             raise ValueError('Claude Code is not installed')
-        subprocess.Popen([exe, '--desktop', '--resume', sid], creationflags=worker.HIDDEN,
+        subprocess.Popen([exe, '--desktop', '--resume', sid], **worker.HIDDEN,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return 'Opening the chat in Claude Desktop'
     if action == 'link':
@@ -328,10 +335,10 @@ def open_action(mb, body):
         if body.get('mode') == 'path':
             return str(target)
         if body.get('mode') == 'open' or not target.is_file():
-            os.startfile(target)
+            system.open_path(target)
             return f'Opened {target.name}'
         reveal(target)
-        return 'Opened in File Explorer'
+        return f'Opened in {system.FILE_MANAGER}'
     raise ValueError('Unknown action')
 
 

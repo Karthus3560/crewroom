@@ -3,7 +3,7 @@ import argparse
 import os
 import sys
 
-from . import projects, transcripts, worker
+from . import projects, status, transcripts, worker
 from .db import Mailbox
 from .members import app_of, display
 
@@ -87,12 +87,25 @@ def main(argv=None):
     s = sub.add_parser('roles', help="who does what in this folder's project")
     s.add_argument('--cwd', default=None)
     sub.add_parser('whoami', help='print detected identity and session')
+    sub.add_parser('status', help='which Crewroom is installed and running, and where its data is')
+    sub.add_parser('stop', help='stop the Crewroom server (running requests keep going)')
     s = sub.add_parser('_work')
     s.add_argument('id')
 
     a = ap.parse_args(argv)
     if a.cmd == '_work':
         return worker.work(a.id)
+    if a.cmd == 'status':
+        print('\n'.join(status.report()))
+        return 0
+    if a.cmd == 'stop':
+        was = status.ping()
+        if not was:
+            print('Crewroom is not running.')
+            return 0
+        ok = status.stop()
+        print('Stopped the Crewroom server.' if ok else 'Could not stop the Crewroom server.')
+        return 0 if ok else 1
     me = whoami(a.me)
     mb = Mailbox()
     _names.update(display(mb.saved_projects()))
@@ -120,9 +133,9 @@ def main(argv=None):
             for r in rows:
                 print(f"[{r['id']}] {r['status']:<8} from {nm(r['sender'])}: {r['title']}  ({r['cwd'] or ''})")
         elif a.cmd in ('take', 'done', 'fail', 'reply'):
-            status = {'take': 'working', 'done': 'done', 'fail': 'failed'}.get(a.cmd)
-            if status:
-                mb.set_status(a.id, status, me, a.message, session=my_session(me), files=a.file)
+            new_status = {'take': 'working', 'done': 'done', 'fail': 'failed'}.get(a.cmd)
+            if new_status:
+                mb.set_status(a.id, new_status, me, a.message, session=my_session(me), files=a.file)
             else:
                 mb.say(me, a.message, rid=a.id, session=my_session(me), files=a.file, kind='reply')
             print(f'Posted to request {a.id}.')

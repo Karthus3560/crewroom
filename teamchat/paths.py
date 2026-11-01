@@ -1,15 +1,18 @@
-"""Where Team Chat keeps its data, and where the Claude and Codex programs live."""
+"""Where Crewroom keeps its data, and where the Claude and Codex programs live."""
 import glob
 import os
 import shutil
 import subprocess
 from pathlib import Path
 
+from . import system
+
 ROOT = Path(__file__).resolve().parents[1]
 HOME = Path.home()
-DATA = Path(os.environ.get('TEAMCHAT_DATA') or Path(os.environ.get('LOCALAPPDATA', HOME)) / 'TeamChat')
+DATA = system.data_dir()
 DB = DATA / 'team.sqlite3'
 LOGS = DATA / 'logs'
+INSTALL = DATA / 'install.json'  # written by install.py: which folder is installed, and what it added
 PORT = int(os.environ.get('TEAMCHAT_PORT', '47800'))
 
 CLAUDE_PROJECTS = HOME / '.claude' / 'projects'
@@ -24,16 +27,23 @@ def _newest(patterns):
 
 def find_codex():
     """The Codex CLI moves with every app update, so look it up fresh each time."""
-    try:
-        out = subprocess.run(['powershell', '-NoProfile', '-Command',
-            '(Get-AppxPackage -Name "OpenAI.Codex*" | Sort-Object Version -Descending | Select-Object -First 1).InstallLocation'],
-            capture_output=True, text=True, timeout=15, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0)).stdout.strip()
-        if out and (Path(out) / 'app' / 'resources' / 'codex.exe').exists():
-            return str(Path(out) / 'app' / 'resources' / 'codex.exe')
-    except (OSError, subprocess.SubprocessError):
-        pass
-    local = os.environ.get('LOCALAPPDATA', '')
-    return _newest([os.path.join(local, 'OpenAI', 'Codex', 'bin', '*', 'codex.exe')]) or shutil.which('codex')
+    if system.WINDOWS:
+        try:
+            out = subprocess.run(['powershell', '-NoProfile', '-Command',
+                '(Get-AppxPackage -Name "OpenAI.Codex*" | Sort-Object Version -Descending | Select-Object -First 1).InstallLocation'],
+                capture_output=True, text=True, timeout=15, **system.hidden()).stdout.strip()
+            if out and (Path(out) / 'app' / 'resources' / 'codex.exe').exists():
+                return str(Path(out) / 'app' / 'resources' / 'codex.exe')
+        except (OSError, subprocess.SubprocessError):
+            pass
+        local = os.environ.get('LOCALAPPDATA', '')
+        return _newest([os.path.join(local, 'OpenAI', 'Codex', 'bin', '*', 'codex.exe')]) or shutil.which('codex')
+    if system.MAC:  # the Codex app carries its own CLI
+        app = _newest(['/Applications/Codex.app/Contents/Resources/codex', str(HOME / 'Applications/Codex.app/Contents/Resources/codex')])
+        if app:
+            return app
+    found = system.candidates('codex')
+    return found[0] if found else None
 
 
 def find_claude():
@@ -41,7 +51,15 @@ def find_claude():
     env = os.environ.get('CLAUDE_CODE_EXECPATH')
     if env and Path(env).exists():
         return env
-    local = os.environ.get('LOCALAPPDATA', '')
-    return _newest([os.path.join(local, 'Claude-Data', 'claude_*', 'claude-code', '*', '*', 'claude.exe'),
-                    os.path.join(local, 'AnthropicClaude', 'app-*', 'resources', 'claude-code', '*', 'claude.exe')]) \
-        or shutil.which('claude')
+    if system.WINDOWS:
+        local = os.environ.get('LOCALAPPDATA', '')
+        return _newest([os.path.join(local, 'Claude-Data', 'claude_*', 'claude-code', '*', '*', 'claude.exe'),
+                        os.path.join(local, 'AnthropicClaude', 'app-*', 'resources', 'claude-code', '*', 'claude.exe')]) \
+            or shutil.which('claude')
+    if system.MAC:
+        app = _newest([str(HOME / 'Library/Application Support/Claude/claude-code/*/claude'),
+                       str(HOME / 'Library/Application Support/Claude-3p/claude-code/*/claude')])
+        if app:
+            return app
+    found = system.candidates('claude')
+    return found[0] if found else None

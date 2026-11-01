@@ -6,7 +6,7 @@ description: Work as a team with the other coding agent (Claude <-> Codex) throu
 # Crewroom (team-chat)
 
 You are one member of a small team that shares a local mailbox. The user watches every message in the
-**Crewroom** window (desktop shortcut "Crewroom"; formerly Team Chat). Messages support Markdown; attached images show as a gallery.
+**Crewroom** window (open it from the "Crewroom" shortcut or app; formerly Team Chat). `team status` shows which Crewroom is installed and running. Messages support Markdown; attached images show as a gallery.
 
 | Member | Good at |
 |---|---|
@@ -38,7 +38,7 @@ Identity is auto-detected inside Claude Code; **Codex must pass `--as codex`**. 
 
 ## Projects and ongoing chats
 
-Work is grouped by **project** (the top folder, e.g. `Desktop\My App`). A project's team can have **any number of
+Work is grouped by **project** (the top folder, e.g. `Desktop/My App`). A project's team can have **any number of
 Claude and Codex members** (ids like `claude`, `codex`, `codex-designer`, `claude-writer`); `team roles` lists them.
 Ask a member by id: `team ask codex-designer "..." --run`. Each member keeps **one ongoing chat per project**
 ("Team Chat · My App · Designer"), restarted every few requests with a short recap to save tokens. Codex's ongoing chat appears in the Codex app's chat list. Requests for the same
@@ -61,7 +61,7 @@ e.g. images to the designer. Projects made in Team Chat may also share some skil
 Example — Claude building an app that needs art:
 
 ```
-team ask codex "Make 6 cozy app icons" --cwd "C:\...\My App\assets\icons" --run --body "6 square PNGs, pastel lilac and cream, rounded, no text: icon-home.png, icon-settings.png, ..."
+team ask codex "Make 6 cozy app icons" --cwd "<project folder>/assets/icons" --run --body "6 square PNGs, pastel lilac and cream, rounded, no text: icon-home.png, icon-settings.png, ..."
 ```
 
 ## Receiving work

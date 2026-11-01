@@ -7,12 +7,14 @@ import hashlib
 import os
 from pathlib import Path
 
+from . import system
+
 HOME = Path.home()
 # Folders whose direct children are projects.
 CONTAINERS = [HOME / 'Desktop', HOME / 'OneDrive' / 'Desktop', HOME / 'Documents', HOME / 'Downloads',
               HOME / 'OneDrive' / 'Documents', HOME / 'source' / 'repos', HOME / 'Projects', HOME]
 QUICK = HOME / 'Documents' / 'Codex'                 # Codex app's one-off chat folders
-SCRATCH = [HOME / 'AppData', Path(os.environ.get('TEMP', HOME / 'AppData' / 'Local' / 'Temp'))]
+SCRATCH = system.scratch_dirs()
 
 QUICK_KEY, SCRATCH_KEY, NONE_KEY = '~quick', '~scratch', '~none'
 VIRTUAL = {QUICK_KEY: 'Codex quick chats', SCRATCH_KEY: 'Scratch & temporary', NONE_KEY: 'No folder'}
