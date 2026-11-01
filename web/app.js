@@ -34,9 +34,13 @@ async function api(path, body) {
   return data;
 }
 function toast(text, error) {
+  const box = $('#toasts');
   const t = el('div', { class: 'toast' + (error ? ' error' : '') }, text);
-  $('#toasts').append(t);
-  setTimeout(() => t.remove(), error ? 6000 : 3200);
+  box.append(t);
+  // Open dialogs sit in the browser's top layer, above everything else on the page. The toast box is a popover, which
+  // lives in that layer too; showing it again puts it on top of whatever dialog is open now.
+  if (box.showPopover) { if (box.matches(':popover-open')) box.hidePopover(); box.showPopover(); }
+  setTimeout(() => { t.remove(); if (!box.children.length && box.hidePopover && box.matches(':popover-open')) box.hidePopover(); }, error ? 6000 : 3200);
 }
 async function act(body, okText) {
   try { const r = await api('open', body); toast(okText || r.message); } catch (e) { toast(e.message, true); }
@@ -972,6 +976,12 @@ $('#project-form').addEventListener('submit', async (e) => {
 let about = null;
 async function loadAbout() {
   try { about = await api('ping'); } catch { return; }
+  if (about.dev && !loadAbout.watching) {  // dev copy: reload by itself when the window's files change
+    loadAbout.watching = true;
+    setInterval(async () => {
+      try { const p = await api('ping'); if (p.stamp && p.stamp !== about.stamp) location.reload(); } catch { /* restarting */ }
+    }, 1500);
+  }
   const other = about.installedRoot && about.installedRoot !== about.root;
   const b = $('#about');
   b.replaceChildren(el('b', {}, `Crewroom ${about.version}`), el('br'), el('span', { class: 'running-dot' }),

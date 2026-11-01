@@ -242,6 +242,8 @@ textarea { flex: 1; border: 0; outline: 0; resize: none; background: none; max-h
   background: repeating-conic-gradient(#ddd 0 25%, #fff 0 50%) 0 0 / 20px 20px; }
 .lightbox-bar { display: flex; gap: 8px; cursor: default; }
 .toasts { position: fixed; right: 18px; bottom: 18px; display: flex; flex-direction: column; gap: 8px; z-index: 20; }
+.toasts[popover] { inset: auto 18px 18px auto; margin: 0; border: 0; padding: 0; background: transparent; overflow: visible; }
+.toasts[popover]:not(:popover-open) { display: none; }
 .toast { background: var(--text); color: var(--bg); padding: 9px 14px; border-radius: 10px; font-size: 13px; box-shadow: 0 6px 20px rgba(0,0,0,.2); max-width: 360px; animation: rise .2s ease-out; }
 .toast.error { background: #b42318; color: #fff; }
 

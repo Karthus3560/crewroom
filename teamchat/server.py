@@ -22,6 +22,12 @@ FILE_CSP = "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline';
 _lock = threading.Lock()
 _sessions_cache = {'at': 0, 'value': []}
 _window = {'seen': 0}  # when a Crewroom window last asked for news; the tray uses it to notice the window closed
+DEV = {'on': False}   # serve(dev=True): the window reloads itself when web/ changes (see web_stamp)
+
+
+def web_stamp():
+    """Newest change time of the window's files, so a dev window can reload itself after an edit."""
+    return max((p.stat().st_mtime for p in WEB.rglob('*') if p.is_file()), default=0)
 ONBOARDED = paths.DATA / 'onboarded'
 
 
@@ -106,7 +112,8 @@ class Handler(BaseHTTPRequestHandler):
                 rec = status.installed() or {}
                 return self._send(200, {'ok': True, 'app': 'teamchat', 'version': __version__, 'root': str(paths.ROOT),
                                         'pid': os.getpid(), 'data': str(paths.DATA), 'installedRoot': rec.get('root'),
-                                        'installedVersion': rec.get('version'), 'installer': rec.get('installer'), 'uninstall': status.uninstall_hint(rec.get('root') or paths.ROOT),
+                                        'installedVersion': rec.get('version'), 'installer': rec.get('installer'),
+                                        **({'dev': True, 'stamp': web_stamp()} if DEV['on'] else {}), 'uninstall': status.uninstall_hint(rec.get('root') or paths.ROOT),
                                         'system': 'windows' if system.WINDOWS else 'mac' if system.MAC else 'linux'})
             return self.static(url.path)
         except KeyError:
@@ -512,6 +519,7 @@ def serve(port=paths.PORT, dev=False):
     """dev=True: a second copy for working on the window next to the installed Crewroom, on the same data. It runs
     no Supervisor (two would restart and retry the same requests) and shows no tray icon."""
     httpd = Server(('127.0.0.1', port), Handler)
+    DEV['on'] = dev
     from . import supervisor
     if not dev:
         supervisor.start_thread()
