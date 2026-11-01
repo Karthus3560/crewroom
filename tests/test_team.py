@@ -206,6 +206,21 @@ class ServerTests(unittest.TestCase):
         code, data = self.call('/api/ask', {'to': 'codex', 'title': 'Queue only'})
         self.assertEqual((code, json.loads(data)['status']), (200, 'asked'))
 
+    def test_setup_check_and_onboarding(self):
+        code, data = self.call('/api/setup-check')
+        check = json.loads(data)
+        self.assertEqual(code, 200)
+        self.assertEqual(set(check['skills']), {'claude', 'codex'})
+        self.assertFalse(check['onboarded'])
+        self.assertEqual(self.call('/api/onboarded', {})[0], 200)
+        self.assertTrue(json.loads(self.call('/api/setup-check')[1])['onboarded'])
+
+    def test_tray_status_counts_work(self):
+        tip, lines, working = server.tray_status()
+        self.assertIn('is running', tip)
+        self.assertLessEqual(len(tip), 127)
+        self.assertEqual(lines[0], f'Crewroom {__version__} is running')
+
     def test_unknown_attachment_is_404(self):
         self.assertEqual(self.call('/api/file/nope')[0], 404)
 

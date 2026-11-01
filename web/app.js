@@ -909,8 +909,8 @@ async function loadAbout() {
   try { about = await api('ping'); } catch { return; }
   const other = about.installedRoot && about.installedRoot !== about.root;
   const b = $('#about');
-  b.replaceChildren(el('b', {}, `Crewroom ${about.version}`), el('br'),
-    other ? 'Not the installed copy' : 'from ' + about.root.split(/[\\/]/).filter(Boolean).pop());
+  b.replaceChildren(el('b', {}, `Crewroom ${about.version}`), el('br'), el('span', { class: 'running-dot' }),
+    other ? 'Running · not the installed copy' : 'Running · click to stop');
   b.classList.toggle('warn', !!other);
 }
 $('#about').onclick = async () => {
@@ -924,15 +924,58 @@ $('#about').onclick = async () => {
     el('span', {}, 'Your data: ', el('span', { class: 'about-path' }, about.data)),
     `To uninstall: ${about.uninstall}. Your data is kept.`,
     'Stop Crewroom closes this server. Requests already running keep going; open Crewroom again to see them.',
-  ].filter(Boolean), [{ label: 'Stop Crewroom', value: 'stop', cls: 'danger' }, { label: 'Close', value: null, cls: 'primary' }]);
+    about.system === 'windows' ? 'Closing the window does not stop Crewroom: it keeps running in the notification area (by the clock) so your team can finish. Right-click its icon there to stop it.'
+      : 'Closing the window does not stop Crewroom: it keeps running in the background so your team can finish.',
+  ].filter(Boolean), [{ label: 'Setup check', value: 'setup' }, { label: 'Stop Crewroom', value: 'stop', cls: 'danger' }, { label: 'Close', value: null, cls: 'primary' }]);
+  if (pick === 'setup') return showWelcome();
   if (pick !== 'stop') return;
   try { await api('shutdown', {}); } catch { /* it closed before answering */ }
   document.body.replaceChildren(el('div', { class: 'empty', style: 'margin:20vh auto;text-align:center;font-size:15px' },
     'Crewroom is stopped. Open it again from its shortcut whenever you like. You can close this window.'));
 };
 
+// ---------- first run: what Crewroom is, and is this computer ready ----------
+async function showWelcome() {
+  const dlg = $('#welcome');
+  $('#welcome-body').replaceChildren(el('div', { class: 'empty' }, 'Checking this computer…'));
+  if (!dlg.open) dlg.showModal();
+  let c;
+  try { c = await api('setup-check'); } catch { $('#welcome-body').replaceChildren(el('p', {}, 'Could not reach the Crewroom server.')); return; }
+  const row = (ok, title, hint) => el('div', { class: 'check' }, el('span', { class: 'check-mark ' + (ok ? 'ok' : 'no') }, ok ? '✓' : '!'),
+    el('div', {}, title, ok ? null : el('small', {}, hint)));
+  const agents = !!(c.claude || c.codex);
+  $('#welcome-body').replaceChildren(
+    el('section', {}, el('h3', {}, 'How it works'), el('ol', { class: 'how' },
+      el('li', {}, el('b', {}, 'You lead. '), 'Make a project (a folder) and pick your crew: Claude and Codex members, each with a role.'),
+      el('li', {}, el('b', {}, 'They work in their own apps. '), 'Claude Code and Codex do the real work, using your own plans, and hand tasks to each other with the team skill.'),
+      el('li', {}, el('b', {}, 'Everything lands here. '), 'Requests, replies, files and images show up in this window as they happen.'))),
+    el('section', {}, el('h3', {}, 'This computer'), el('div', { class: 'checks' },
+      row(!!c.claude, c.claude ? 'Claude Code is installed' : 'Claude Code was not found',
+        'Install the Claude app (claude.ai/download), open it once and switch to the Code tab. Or install Claude Code.'),
+      row(!!c.codex, c.codex ? 'Codex is installed' : 'Codex was not found', 'Install the Codex app (chatgpt.com/codex) or the Codex CLI and sign in.'),
+      row(c.skills.claude && c.skills.codex, c.skills.claude && c.skills.codex ? 'The team skill is set up for Claude and Codex'
+        : 'The team skill is not set up', 'Run the Crewroom installer again: it sets this up for both apps.'),
+      agents ? null : el('p', {}, 'Crewroom needs at least one of Claude Code or Codex. Install one, then press Check again.')),
+      el('div', {}, el('button', { type: 'button', class: 'link-btn', onclick: () => showWelcome() }, 'Check again'))),
+    el('section', {}, el('h3', {}, 'Try it'), el('div', { class: 'try' },
+      'Open a ', el('b', {}, 'new'), ' chat in Claude or Codex (chats that were already open don’t know the skill yet) and say: ',
+      el('i', {}, '“ask Codex to make one app icon and tell me when it’s done.”'), ' Or write in #general here.')),
+    el('section', {}, el('h3', {}, 'Closing the window'), el('p', {}, c.tray
+      ? 'Crewroom keeps running in the notification area, by the clock, so your team can finish their work. Its icon shows what is going on; right-click it to stop Crewroom.'
+      : 'Crewroom keeps running in the background so your team can finish their work. Click the version in the bottom-left corner of this window to see it or stop it.')));
+}
+async function finishWelcome(createProject) {
+  $('#welcome').close();
+  try { await api('onboarded', {}); } catch { /* shown again next time */ }
+  if (createProject) openProjectDialog();
+}
+$('#welcome-go').onclick = () => finishWelcome(true);
+$('#welcome-later').onclick = () => finishWelcome(false);
+$('#welcome-x').onclick = () => finishWelcome(false);
+
 (async function start() {
   loadAbout();
+  api('setup-check').then((c) => { if (!c.onboarded) showWelcome(); }).catch(() => {});
   try { await poll(true); } catch (e) { toast('Crewroom server is not running', true); }
   await loadSessions();
   show({ type: 'room' });

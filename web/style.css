@@ -340,6 +340,18 @@ details.older[open] summary::before { content: '▾ '; }
 .shade.on { border-color: var(--text); }
 
 .small-dialog { width: min(520px, 94vw); }
+.welcome-dialog { width: min(640px, 94vw); }
+.welcome-dialog .dlg-body { gap: 18px; padding-bottom: 16px; }
+.welcome-dialog p { margin: 0; font-size: 13.5px; line-height: 1.5; }
+.how { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; line-height: 1.45; }
+.checks { display: flex; flex-direction: column; gap: 8px; }
+.check { display: flex; gap: 10px; align-items: flex-start; font-size: 13.5px; }
+.check-mark { flex: none; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700; color: #fff; }
+.check-mark.ok { background: var(--codex); }
+.check-mark.no { background: #d97706; }
+.check small { display: block; color: var(--muted); font-size: 12.5px; }
+.try { background: var(--soft); border-radius: 10px; padding: 10px 12px; font-size: 13.5px; }
+.running-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--codex); margin-right: 5px; vertical-align: 1px; }
 .small-dialog .dlg-body p { margin: 0; font-size: 13.5px; line-height: 1.5; }
 .fresh-mark { display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--muted); font-size: 12.5px;
   border: 1px dashed var(--line); border-radius: 10px; padding: 7px 12px; }

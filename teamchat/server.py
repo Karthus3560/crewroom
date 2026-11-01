@@ -21,6 +21,8 @@ PAGE_CSP = ("default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-
 FILE_CSP = "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox"
 _lock = threading.Lock()
 _sessions_cache = {'at': 0, 'value': []}
+_window = {'seen': 0}  # when a Crewroom window last asked for news; the tray uses it to notice the window closed
+ONBOARDED = paths.DATA / 'onboarded'
 
 
 def mailbox():
@@ -67,6 +69,7 @@ class Handler(BaseHTTPRequestHandler):
         q = {k: v[0] for k, v in parse_qs(url.query).items()}
         try:
             if url.path == '/api/state':
+                _window['seen'] = time.time()
                 return self._send(200, self.state(int(q.get('after', 0))))
             if url.path == '/api/sessions':
                 return self._send(200, sessions_and_projects())
@@ -91,6 +94,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(200, found or {})
                 finally:
                     mb.close()
+            if url.path == '/api/setup-check':
+                return self._send(200, setup_check())
             if url.path == '/api/ping':
                 rec = status.installed() or {}
                 return self._send(200, {'ok': True, 'app': 'teamchat', 'version': __version__, 'root': str(paths.ROOT),
@@ -113,6 +118,10 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(size) or b'{}')
         except ValueError:
             return self._error(400, 'Bad JSON')
+        if self.path == '/api/onboarded':
+            paths.DATA.mkdir(parents=True, exist_ok=True)
+            ONBOARDED.write_text(__version__, encoding='utf-8')
+            return self._send(200, {'ok': True})
         if self.path == '/api/shutdown':  # the window's Stop button, the launcher and the installer
             self._send(200, {'ok': True})
             threading.Thread(target=self.server.shutdown, daemon=True).start()
@@ -426,12 +435,52 @@ def route_to_coordinator(mb, key, channel, text):
     return coordinator
 
 
+def setup_check():
+    """What the welcome screen shows: are the agents and the team skill in place on this computer?"""
+    def skill(rel):
+        try:
+            return str(paths.ROOT / 'team.py') in (Path.home() / rel / 'SKILL.md').read_text(encoding='utf-8')
+        except OSError:
+            return False
+    return {'version': __version__, 'system': 'windows' if system.WINDOWS else 'mac' if system.MAC else 'linux',
+            'claude': paths.find_claude(), 'codex': paths.find_codex(),
+            'skills': {'claude': skill('.claude/skills/team-chat'), 'codex': skill('.agents/skills/team-chat')},
+            'onboarded': ONBOARDED.exists(), 'tray': system.WINDOWS and not os.environ.get('TEAMCHAT_NO_TRAY')}
+
+
+def tray_status():
+    """(tooltip, menu lines, working count) for the tray icon."""
+    mb = mailbox()
+    try:
+        open_reqs = mb.requests(open_only=True)
+    finally:
+        mb.close()
+    working = sum(r['status'] == 'working' for r in open_reqs)
+    waiting = sum(r['status'] in ('queued', 'asked') for r in open_reqs)
+    news = [f'{working} request{"s" if working != 1 else ""} working' if working else 'Nobody is working right now']
+    if waiting:
+        news.append(f'{waiting} waiting to start')
+    return f'Crewroom {__version__} is running\n' + ' · '.join(news), [f'Crewroom {__version__} is running', *news], working
+
+
 def serve(port=paths.PORT):
     httpd = ThreadingHTTPServer(('127.0.0.1', port), Handler)
     httpd.daemon_threads = True
     from . import supervisor
     supervisor.start_thread()
-    httpd.serve_forever()
+    tray = None
+    if system.WINDOWS and not os.environ.get('TEAMCHAT_NO_TRAY'):
+        from .tray import Tray
+        tray = Tray(WEB / 'assets' / 'app-icon.ico', open_window=lambda: system.open_window(status.url(port)),
+                    stop=lambda: threading.Thread(target=httpd.shutdown, daemon=True).start(),
+                    status=tray_status, seen=lambda: _window['seen'])
+        tray.start()
+    try:
+        httpd.serve_forever()
+    finally:
+        if tray:  # take the icon away with us, so it never lingers after Crewroom stopped
+            tray.close()
+            time.sleep(0.3)
 
 
 if __name__ == '__main__':
