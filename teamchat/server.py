@@ -25,6 +25,16 @@ _window = {'seen': 0}  # when a Crewroom window last asked for news; the tray us
 DEV = {'on': False}   # serve(dev=True): the window reloads itself when web/ changes (see web_stamp)
 
 
+def web_manifest(port):
+    """Makes Crewroom installable as an app in Edge or Chrome. Installed, it can draw its own title bar (Window Controls
+    Overlay): the control bar becomes the title bar. A dev copy gets its own name, so the two never mix."""
+    dev = DEV['on']
+    return {'id': '/', 'name': 'Crewroom (dev)' if dev else 'Crewroom', 'short_name': 'Crewroom', 'description': 'Your AI team, together',
+            'start_url': '/', 'scope': '/', 'display': 'standalone', 'display_override': ['window-controls-overlay'],
+            'background_color': '#1c1a18', 'theme_color': '#141210',
+            'icons': [{'src': f'assets/app-icon-{s}.png', 'sizes': f'{s}x{s}', 'type': 'image/png', 'purpose': 'any'} for s in (192, 512)]}
+
+
 def web_stamp():
     """Newest change time of the window's files, so a dev window can reload itself after an edit."""
     return max((p.stat().st_mtime for p in WEB.rglob('*') if p.is_file()), default=0)
@@ -108,6 +118,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, worklog.read(q.get('id', '')))
             if url.path == '/api/setup-check':
                 return self._send(200, setup_check())
+            if url.path == '/manifest.webmanifest':
+                return self._send(200, web_manifest(self.server.server_address[1]), 'application/manifest+json; charset=utf-8')
             if url.path == '/api/ping':
                 rec = status.installed() or {}
                 return self._send(200, {'ok': True, 'app': 'teamchat', 'version': __version__, 'root': str(paths.ROOT),

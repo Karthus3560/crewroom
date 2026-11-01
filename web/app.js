@@ -1023,6 +1023,22 @@ $('#project-form').addEventListener('submit', async (e) => {
   } finally { $('#dlg-save').disabled = false; }
 });
 
+// ---------- installing Crewroom as an app (its own title bar) ----------
+let installPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installPrompt = e; });
+window.addEventListener('appinstalled', () => toast('Crewroom is installed as an app. Open it from the Start menu; this window can be closed.'));
+const runningAsApp = () => matchMedia('(display-mode: standalone), (display-mode: window-controls-overlay)').matches;
+async function installApp() {
+  if (!installPrompt) {
+    toast('Install from the browser instead: menu (…) → Apps → “Install Crewroom”.', true);
+    return;
+  }
+  installPrompt.prompt();
+  const { outcome } = await installPrompt.userChoice;
+  installPrompt = null;
+  if (outcome !== 'accepted') toast('Not installed. You can install it any time from here.');
+}
+
 // ---------- which Crewroom is this ----------
 let about = null;
 async function loadAbout() {
@@ -1052,10 +1068,12 @@ $('#about').onclick = async () => {
     'Stop Crewroom closes this server. Requests already running keep going; open Crewroom again to see them.',
     about.system === 'windows' ? 'Closing the window does not stop Crewroom: it keeps running in the notification area (by the clock) so your team can finish. Right-click its icon there to stop it.'
       : 'Closing the window does not stop Crewroom: it keeps running in the background so your team can finish.',
-  ].filter(Boolean), [{ label: 'Setup check', value: 'setup' },
+    runningAsApp() ? null : 'Install Crewroom as an app to give it its own title bar (the control bar becomes it) and its own Start-menu entry.',
+  ].filter(Boolean), [runningAsApp() ? null : { label: 'Install as app', value: 'install', cls: 'primary' }, { label: 'Setup check', value: 'setup' },
     about.installer && about.installer !== 'setup' ? { label: 'Uninstall…', value: 'uninstall', cls: 'danger' } : null,
     { label: 'Stop Crewroom', value: 'stop', cls: 'danger' }, { label: 'Close', value: null, cls: 'primary' }].filter(Boolean));
   if (pick === 'setup') return showWelcome();
+  if (pick === 'install') return installApp();
   if (pick === 'uninstall') return uninstall();
   if (pick !== 'stop') return;
   try { await api('shutdown', {}); } catch { /* it closed before answering */ }

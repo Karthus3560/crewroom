@@ -520,6 +520,14 @@ details.older[open] summary::before { content: '▾ '; }
 @media (max-width: 760px) { .role-cards { grid-template-columns: 1fr 1fr; } .m-two, .member-dialog .agent-tiles { grid-template-columns: 1fr 1fr; } }
 
 /* ---------- control bar ---------- */
+/* Installed as an app with Window Controls Overlay, the control bar is the window's title bar: drag the window by it,
+   and leave room on the right for the system's minimise / maximise / close buttons. */
+@media (display-mode: window-controls-overlay) {
+  .topbar { app-region: drag; -webkit-app-region: drag; }
+  .topbar button, .topbar a, .topbar input, .topbar select { app-region: no-drag; -webkit-app-region: no-drag; }
+  .tb-project { padding-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) + 10px); }
+  .tb-project .panel-path { display: none; }
+}
 .app { grid-template-rows: auto minmax(0, 1fr); }
 .topbar { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: stretch; min-height: 58px;
   background: var(--rail); border-bottom: 1px solid var(--line); }
