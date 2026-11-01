@@ -368,7 +368,7 @@ def run_cli(mb, req, project, cwd, prompt, log, should_stop):
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace', **HIDDEN)
     lines = queue.Queue()
     threading.Thread(target=lambda: [lines.put(l) for l in proc.stdout] + [lines.put(None)], daemon=True).start()
-    session, final, failed, end, tail = known, '', False, time.time() + TIMEOUT, []
+    session, final, failed, end, tail, said = known, '', False, time.time() + TIMEOUT, [], ''
     remembered = False
     while True:
         if should_stop() or time.time() > end:
@@ -392,8 +392,12 @@ def run_cli(mb, req, project, cwd, prompt, log, should_stop):
             session, remembered = got['session'], True
             mb.remember_session(project['key'], member['id'], session, project['turns'] + 1 if known else 1)
             mb.link(req['id'], worker_session=session)
+        if got.get('said'):
+            said = got['said']
         if 'final' in got:
             final, failed = got['final'], got['error']
+            if said and not failed:
+                final = said  # the member's last message reads as its note; the result field runs messages together
     code = proc.wait()
     if failed or (code != 0 and not final):
         if known and not remembered:

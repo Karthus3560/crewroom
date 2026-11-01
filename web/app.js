@@ -10,7 +10,7 @@ const state = {
   view: { type: 'room' }, to: 'team', transcriptSig: '', ready: false, cleared: {}, showOlder: new Set(),
 };
 
-marked.setOptions({ gfm: true, breaks: false });
+marked.setOptions({ gfm: true, breaks: true });  // agents put one item per line
 
 // ---------- small helpers ----------
 function load(key, fallback) { try { return JSON.parse(localStorage.getItem('tc.' + key)) ?? fallback; } catch { return fallback; } }
@@ -233,10 +233,11 @@ function renderTeam() {
   const stateOf = (id) => reqs.some((r) => r.recipient === id && r.status === 'working') ? ['busy', 'working']
     : manual.includes(id) ? ['manual', 'own app']
     : reqs.some((r) => r.recipient === id && ['queued', 'asked'].includes(r.status)) ? ['waiting', 'waiting'] : ['free', 'free'];
-  const card = (id, label, pic, st, title) => el('button', { type: 'button', class: `member-card ${st[0]} ${appOf(id)}` + (state.to === id ? ' on' : ''),
-    title, onclick: () => pickRecipient(id) }, pic, el('span', { class: 'mc-name' }, label), el('span', { class: 'mc-state' }, st[1]));
+  // One slim row each, so a team of 12 still fits; the ring around the avatar and the dot show what it's doing.
+  const card = (id, label, pic, st, title) => el('button', { type: 'button', class: `member-row ${st[0]} ${appOf(id)}` + (state.to === id ? ' on' : ''),
+    title, onclick: () => pickRecipient(id) }, el('span', { class: 'mr-pic' }, pic), el('span', { class: 'mr-name' }, label), el('span', { class: 'mr-state' }, st[1]));
   $('#team').replaceChildren(
-    card('team', 'Team', el('img', { class: 'avatar sm', src: ICON('team-room'), alt: '' }), ['team', state.view.type === 'channel' ? '#' + CHANNEL[state.view.channel] : 'room'],
+    card('team', 'Whole team', el('img', { class: 'avatar sm', src: ICON('team-room'), alt: '' }), ['everyone', state.view.type === 'channel' ? '#' + CHANNEL[state.view.channel] : 'room'],
       'Talk to the whole team'),
     ...ids.map((id) => card(id, member(id).name, avatar(id, true), stateOf(id), `${member(id).name} · ${member(id).role || ''}`)));
 }
@@ -310,7 +311,7 @@ function messageNode(m, inRoom) {
           btn('cancel', 'Dismiss', (e) => { e.stopPropagation(); cancel(req, true); }, 'danger')) : null),
       el('div', { class: 'rc-title' }, req.title),
       req.cwd ? el('div', { class: 'rc-folder' }, req.cwd) : null,
-      m.body && m.body !== req.title ? markdown(m.body, base) : null,
+      m.body && m.body !== req.title ? foldable(markdown(m.body, base), inRoom && m.body.length > 500, 'Show the full brief') : null,
       ...attachments(m.files));
     return el('div', { class: 'msg ' + m.sender }, avatar(m.sender), el('div', { class: 'msg-body' }, head, card));
   }
@@ -327,9 +328,21 @@ function messageNode(m, inRoom) {
       m.kind === 'done' ? [el('img', { class: 'done-icon', src: ICON('done'), alt: '' }), 'Finished · ', link]
         : m.kind === 'failed' ? ['✕ Could not finish · ', link] : ['Re: ', link]));
   }
-  if (m.body) bubble.append(markdown(m.body, base));
+  if (m.body) bubble.append(foldable(markdown(m.body, base), inRoom && m.body.length > 1400, 'Show the whole message'));
   bubble.append(...attachments(m.files));
   return el('div', { class: 'msg ' + m.sender }, avatar(m.sender), el('div', { class: 'msg-body' }, head, bubble));
+}
+function foldable(box, fold, label) {
+  // In the Activity feed a long brief or report shows its start with a button for the rest; a request's own page
+  // shows everything.
+  if (!fold) return box;
+  const wrap = el('div', { class: 'fold folded' }, box);
+  const toggle = el('button', { type: 'button', class: 'fold-btn', onclick: (e) => {
+    e.stopPropagation();
+    const open = wrap.classList.toggle('folded');
+    toggle.textContent = open ? label : 'Show less';
+  } }, label);
+  return el('div', {}, wrap, toggle);
 }
 function renderFeed(stick) {
   const feed = $('#feed');
@@ -576,6 +589,8 @@ $('#composer').addEventListener('submit', async (e) => {
       if (!body) return;
       const sent = await api('say', { body, project: state.project, channel: state.view.type === 'channel' ? state.view.channel : 'general' });
       if (sent.routedTo) toast(`${member(sent.routedTo).name} is reading your message`);
+      else if (!(sent.mentions || []).length)  // say so, or it looks like the team is ignoring you
+        toast('Posted for everyone to see. No teammate reads the team room by itself: pick one on the left, @mention one, or set a Producer in Edit team.');
       for (const m of sent.mentions || []) {
         const n = member(m.id).name;
         toast(m.how === 'live' ? `${n} is working: reads your note mid-run and adapts`

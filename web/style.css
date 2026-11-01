@@ -598,3 +598,37 @@ details.older[open] summary::before { content: '▾ '; }
 .folder-chip:hover { border-color: var(--accent); }
 .folder-chip[hidden] { display: none; }
 .composer-foot .composer-hint { margin: 0; }
+
+/* ---------- member list (replaces the tiles: scales to a big team) ---------- */
+.team { display: flex; flex-direction: column; gap: 1px; max-height: 40vh; overflow-y: auto; }
+.member-row { --c: #3f9d6b; display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; border: 1px solid transparent;
+  background: none; border-radius: 9px; padding: 4px 8px 4px 5px; color: var(--text); min-height: 34px; }
+.member-row:hover { background: var(--hover); }
+.member-row.on { background: color-mix(in srgb, var(--accent) 16%, transparent); border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+.mr-pic { flex: none; width: 26px; height: 26px; border-radius: 50%; box-shadow: 0 0 0 2px var(--c); display: grid; place-items: center; }
+.mr-pic .avatar { width: 24px; height: 24px; }
+.member-row.everyone .mr-pic { box-shadow: none; }
+.member-row.everyone .mr-pic img { width: 20px; height: 20px; }
+.mr-name { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mr-state { flex: none; font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 5px; }
+.mr-state::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--c); }
+.member-row.free { --c: #3f9d6b; }
+.member-row.waiting { --c: #d97706; }
+.member-row.manual { --c: #8a8178; }
+.member-row.everyone { --c: var(--accent); }
+.member-row.everyone .mr-state::before { display: none; }
+.member-row.busy.claude { --c: var(--claude); } .member-row.busy.codex { --c: var(--codex); }
+.member-row.busy.cursor { --c: var(--cursor); } .member-row.busy.antigravity { --c: var(--antigravity); }
+.member-row.busy .mr-state { color: var(--c); font-weight: 650; }
+.member-row.busy .mr-state::before, .member-row.busy .mr-pic { animation: pulse 1.4s infinite; }
+
+/* ---------- messages: wrap long words, fold long ones ---------- */
+.md, .request-card, .rc-title, .rc-folder { overflow-wrap: anywhere; min-width: 0; }
+.request-card { min-width: 0; }
+.md li > p { margin: .2em 0; }
+.fold.folded { max-height: 15em; overflow: hidden; position: relative; }
+.fold.folded::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 4em;
+  background: linear-gradient(to bottom, transparent, var(--panel)); pointer-events: none; }
+.fold-btn { margin-top: 6px; border: 1px solid var(--line); background: var(--soft); color: var(--text); border-radius: 99px; padding: 2px 12px;
+  font-size: 12px; font-weight: 600; }
+.fold-btn:hover { border-color: var(--accent); }

@@ -170,7 +170,11 @@ def read(app, event):
     if app == 'cursor':
         if event.get('type') == 'system' and event.get('session_id'):
             return {'session': event['session_id']}
-        if event.get('type') == 'result':
+        if event.get('type') == 'assistant':  # each of Cursor's messages; the last one is its final note
+            parts = (event.get('message') or {}).get('content') or []
+            said = '\n'.join(p.get('text', '') for p in parts if isinstance(p, dict) and p.get('type') == 'text').strip()
+            return {'said': said} if said else {}
+        if event.get('type') == 'result':  # its text glues every message together without spaces, so it's a fallback
             return {'final': event.get('result') or '', 'error': bool(event.get('is_error')) or event.get('subtype') != 'success'}
         return {}
     if app == 'antigravity':
