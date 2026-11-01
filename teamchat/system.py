@@ -22,11 +22,16 @@ HIDDEN = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
 
 
 def data_dir():
-    """Where the mailbox, logs and install record live. Windows keeps its 1.0 place so old data is found."""
+    """Where the mailbox, logs and install record live.
+
+    Not AppData on Windows: the Claude and Codex apps are packaged Windows apps, and Windows quietly redirects
+    AppData writes from anything they start (Claude Code running `team ask`) into a private copy. Crewroom 1.0
+    kept its mailbox there and ended up with two: the window read one while Claude wrote to the other.
+    The home folder is never redirected, which is why ~/.claude and ~/.codex live there too."""
     if os.environ.get('TEAMCHAT_DATA'):
         return Path(os.environ['TEAMCHAT_DATA'])
     if WINDOWS:
-        return Path(os.environ.get('LOCALAPPDATA', HOME)) / 'TeamChat'
+        return HOME / '.crewroom'
     if MAC:
         return HOME / 'Library' / 'Application Support' / 'Crewroom'
     return Path(os.environ.get('XDG_DATA_HOME') or HOME / '.local' / 'share') / 'crewroom'
@@ -226,3 +231,27 @@ def command_line(pid):
         return subprocess.run(['ps', '-o', 'command=', '-p', str(int(pid))], capture_output=True, text=True, timeout=15).stdout.strip()
     except (OSError, ValueError, subprocess.SubprocessError):
         return ''
+
+
+OLD_WINDOWS_DATA = Path(os.environ.get('LOCALAPPDATA', HOME)) / 'TeamChat'  # Crewroom 1.0's mailbox
+
+
+def appdata_redirected():
+    """True when this process runs inside a packaged app (for example the installer started from Claude Code),
+    where Windows sends AppData writes to the app's private copy. Shortcuts made there never reach the Start menu."""
+    if not WINDOWS:
+        return False
+    import uuid
+    roaming = Path(os.environ.get('APPDATA', HOME / 'AppData' / 'Roaming'))
+    packages = Path(os.environ.get('LOCALAPPDATA', HOME / 'AppData' / 'Local')) / 'Packages'
+    probe = roaming / f'crewroom-probe-{uuid.uuid4().hex[:8]}'
+    try:
+        probe.write_text('', encoding='utf-8')
+        return any(packages.glob(f'*/LocalCache/Roaming/{probe.name}'))
+    except OSError:
+        return False
+    finally:
+        try:
+            probe.unlink()
+        except OSError:
+            pass

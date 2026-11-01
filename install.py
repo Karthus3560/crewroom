@@ -87,9 +87,14 @@ def make_launchers(home, desktop, python):
     if system.WINDOWS:
         pythonw = Path(python).with_name('pythonw.exe')
         start_menu = Path(os.environ.get('APPDATA', home / 'AppData' / 'Roaming')) / 'Microsoft/Windows/Start Menu/Programs'
+        folders = [desktop, start_menu]
         if home != Path.home():  # a test run with a pretend home: keep the Start menu out of it
-            start_menu = home / 'Start Menu'
-        for folder in (desktop, start_menu):
+            folders[1] = home / 'Start Menu'
+        elif system.appdata_redirected():
+            folders.pop()
+            say('Skipped the Start menu shortcut: this installer runs inside another app (Claude or Codex), and Windows', 'warn')
+            say('hides Start menu shortcuts made from there. Double-click install.cmd yourself to get one.', 'warn')
+        for folder in folders:
             folder.mkdir(parents=True, exist_ok=True)
             lnk = folder / 'Crewroom.lnk'
             # Paths travel as environment variables, so quotes or non-Latin letters in them can't break the script.
@@ -211,6 +216,10 @@ def install(a, home, desktop):
     if system.WINDOWS and Path(python).name.lower() == 'pythonw.exe':
         python = str(Path(python).with_name('python.exe'))
     say(f'Python:     {python}')
+    say(f'Your data:  {paths.DATA}')
+    if system.WINDOWS and system.OLD_WINDOWS_DATA.exists() and not paths.DB.exists():
+        say(f'Crewroom 1.0 kept its chats in {system.OLD_WINDOWS_DATA}. 1.1 starts fresh in the folder above;', 'warn')
+        say('the old chats stay where they were.', 'warn')
 
     # 1. The "team" skill for Claude Code and Codex, pointing at this folder.
     text = (ROOT / 'skill' / 'team-chat' / 'SKILL.md').read_text(encoding='utf-8')

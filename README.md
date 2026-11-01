@@ -48,7 +48,7 @@ Then just tell an agent: *"ask Codex to make 6 cozy icons for this app and tell 
 - **Window says "can't reach this page"?** See `logs/server.log` in the data folder. Another program may be using port 47800.
 
 ## Good to know
-- **Privacy:** it runs on your machine. The app listens on `127.0.0.1:47800` only, and your mailbox stays in the data folder: `%LOCALAPPDATA%\TeamChat` on Windows, `~/Library/Application Support/Crewroom` on macOS, `~/.local/share/crewroom` on Linux. Agents use **your own** Claude and ChatGPT plans, and their work goes to those providers as usual.
+- **Privacy:** it runs on your machine. The app listens on `127.0.0.1:47800` only, and your mailbox stays in the data folder: `%USERPROFILE%\.crewroom` on Windows (1.0 used `%LOCALAPPDATA%\TeamChat`), `~/Library/Application Support/Crewroom` on macOS, `~/.local/share/crewroom` on Linux. Agents use **your own** Claude and ChatGPT plans, and their work goes to those providers as usual.
 - **No packages:** Python's standard library only. The window is Edge or Chrome in app mode, or your default browser.
 - **Reading chats:** Crewroom only *reads* the apps' own chat files (`~\.claude\projects`, `~\.codex\sessions`). When you set up a team it writes `TEAM.md` into the project and points `AGENTS.md`/`CLAUDE.md` at it.
 - **Tests:** from the Crewroom folder, `python -m unittest tests.test_team`
