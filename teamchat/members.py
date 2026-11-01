@@ -17,8 +17,9 @@ HUES = [0, 45, 90, 150, 200, 250, 300]
 
 
 def auto_hue(mid, taken=()):
-    """The app's own colour for the base member, otherwise the first free shade (stable per id)."""
-    if mid in APPS:
+    """The avatar's true colours for the first member of each app in a project (the avatars are characters: a
+    tinted orange cat looks wrong); later members of the same app get the first free shade (stable per id)."""
+    if mid in APPS or 0 not in taken:
         return 0
     start = sum(map(ord, mid)) % (len(HUES) - 1) + 1
     for i in range(len(HUES) - 1):
