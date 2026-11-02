@@ -437,6 +437,24 @@ def note_running(mb, req, text):
     return 'live' if agents.AGENTS[team.app_of(req['recipient'])].live_notes else 'after'
 
 
+STOP_WORDS = re.compile(r'^\s*(?:@(?:team|everyone|all)\b[\s,:]*)?(?:please\s+)?(?:stop|cancel|halt)\b', re.I)
+
+
+def stop_project(mb, p, channel):
+    """Cancel every open request and round-table in a project; returns how many requests were stopped."""
+    open_ = [r for r in mb.requests(open_only=True) if r['cwd'] and projects.root_of(r['cwd'])[0] == p['key']]
+    for d in mb.discussions():
+        if d['project'] == p['key']:
+            discuss.stop(mb, d['id'])  # cancels its own turn
+    for r in open_:
+        if mb.request(r['id'])['status'] in OPEN:
+            mb.set_status(r['id'], 'cancelled', 'human', 'Stopped by the lead.')
+    n = len(open_)
+    mb.say('human', f"Stopped {n} job{'s' if n != 1 else ''} in this project." if n else 'Nothing was running.',
+           project=p['key'], channel=channel, kind='note')
+    return n
+
+
 def answer_lead(mb, key, channel, text):
     """Who answers a lead's channel message. @Name: those members. @team (or the team room set to Everyone): in
     #discussion a round-table where members talk it through in turns, elsewhere everyone replies at once. Otherwise
@@ -444,6 +462,8 @@ def answer_lead(mb, key, channel, text):
     p = mb.project(key) if key else None
     if not p:
         return {}
+    if STOP_WORDS.match(text):  # "stop", "@team stop everything": the lead wants the work halted, not discussed
+        return {'stopped': stop_project(mb, p, channel)}
     tagged = team.mentions(text, p['settings'])
     live = discuss.running(mb, key, channel)
     if live and not tagged:

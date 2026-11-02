@@ -552,6 +552,15 @@ class MentionTests(unittest.TestCase):
         self.assertIsNone(discuss.advance(self.mb, did, self.started.append))
         self.assertFalse(discuss.stop(self.mb, did))
 
+    def test_stop_means_stop(self):
+        did = self.server.answer_lead(self.mb, 'p', 'discussion', '@team ideas?')['discussion']
+        turn = self.started[-1]
+        self.assertEqual(self.server.answer_lead(self.mb, 'p', 'discussion', '@team stop everything you do here'), {'stopped': 1})
+        self.assertEqual(self.mb.request(turn)['status'], 'cancelled')
+        self.assertEqual(self.mb.discussion(did)['status'], 'stopped')
+        self.assertEqual(self.server.answer_lead(self.mb, 'p', 'general', 'Stop'), {'stopped': 0})
+        self.assertNotIn('stopped', self.server.answer_lead(self.mb, 'p', 'general', '@team how do we stop spam?'))
+
     def test_every_new_team_gets_a_producer(self):
         from teamchat import setup
         two = [{'id': 'codex', 'app': 'codex'}, {'id': 'claude-writer', 'app': 'claude'}]

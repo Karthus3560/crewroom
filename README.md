@@ -1,22 +1,23 @@
-<p align="center"><img src="docs/assets/share-cover.png" alt="Crewroom: your AI team, together" width="860"></p>
+<p align="center"><img src="docs/assets/share-cover.png" alt="Crewroom: your AI team, in one room" width="860"></p>
 
 # Crewroom
 
-**Your AI team, together.** Crewroom turns Claude Code, OpenAI Codex, Cursor and Google Antigravity into one team on your computer (Windows, macOS or Linux). They hand work to each other, results land in one chat, and you lead.
+**Your AI team, in one room.** Crewroom turns Claude Code, OpenAI Codex, Cursor and Google Antigravity into one team on your computer (Windows, macOS or Linux). They hand work to each other, talk decisions through, and you lead.
 
-▶ **[Watch the video (2:23) and see the site](https://karthus3560.github.io/crewroom/)**
+▶ **[Watch the 1:26 film and see the site](https://karthus3560.github.io/crewroom/)**
 
 ## What it does
-- **Hire a crew per project:** any mix of Claude and Codex members, each with its own roles, model and colour, and its own ongoing chat.
+- **Hire a crew per project:** any mix of Claude, Codex, Cursor and Antigravity members, each with its own roles, model and colour, and its own ongoing chat.
+- **Round-tables (new in 1.3):** write `@team` in #discussion. Members answer in turns, see what the others said and speak to each other by name; then the Producer writes the decision and hands out any agreed work. Stop it any time. Outside #discussion, `@team` asks everyone at once.
 - **Real hand-offs:** an agent runs `team ask codex "Make 2 app icons" --run` and keeps working. When the job is done, the files and images land back in the chat. Codex askers get a note in their chat, and Claude waits with `team wait`.
 - **Work in parallel:** different members work at the same time.
-- **Producer:** write what you want in #general in plain words. The Producer sharpens it into orders and routes each one to the member that fits.
-- **@mentions:** tag a member while it works. Codex and Claude both read your note between steps and adapt.
+- **Producer, by default:** new teams get one. Write what you want in plain words; the Producer sharpens it into orders and routes each one to the member that fits. Each team's rules say who answers the team room: the Producer, everyone, or nobody.
+- **@mentions, and stop:** tag a member while it works. Claude and Codex read your note between steps; Cursor and Antigravity get it right after the current job. Write `stop` and every running job in the project stops.
 - **Safety net:**
   - While Crewroom is open, a Supervisor restarts a worker that died, retries a failure once, then asks for help.
   - When a hand-off chain runs too long, a Referee sorts it out, and anything past the limit waits for your OK. Nothing is dropped silently.
-- **Your rules:** Claude members run commands only if you tick *Can run commands*. Common destructive ones (git push, rm -rf, Remove-Item, registry, shutdown) are refused. It's a guard-rail, not a sandbox. Codex works inside its own workspace sandbox.
-- **One window:** projects, team chat with #general and #discussion, requests, galleries, and every agent's chat. Click a file path in a message to open it.
+- **Your rules:** members run commands only if you tick *Can run commands*. Common destructive ones (git push, rm -rf, Remove-Item, registry, shutdown) are refused. It's a guard-rail, not a sandbox. Codex works inside its own workspace sandbox.
+- **One window:** projects, team chat with #general and #discussion, requests with a step-by-step work log, galleries. Click a file path in a message to open it.
 
 ## Install
 
@@ -60,13 +61,13 @@ Then just tell an agent: *"ask Codex to make 6 cozy icons for this app and tell 
 - **Window says "can't reach this page"?** See `logs/server.log` in the data folder. Another program may be using port 47800.
 
 ## Good to know
-- **Privacy:** it runs on your machine. The app listens on `127.0.0.1:47800` only, and your mailbox stays in the data folder: `%USERPROFILE%\.crewroom` on Windows (1.0 used `%LOCALAPPDATA%\TeamChat`), `~/Library/Application Support/Crewroom` on macOS, `~/.local/share/crewroom` on Linux. Agents use **your own** Claude and ChatGPT plans, and their work goes to those providers as usual.
+- **Privacy:** it runs on your machine. The app listens on `127.0.0.1:47800` only, and your mailbox stays in the data folder: `%USERPROFILE%\.crewroom` on Windows (1.0 used `%LOCALAPPDATA%\TeamChat`), `~/Library/Application Support/Crewroom` on macOS, `~/.local/share/crewroom` on Linux. Agents use **your own** Claude, ChatGPT, Cursor and Google plans, and their work goes to those providers as usual.
 - **No packages:** Python's standard library only. The window is Edge or Chrome in app mode, or your default browser.
 - **Reading chats:** Crewroom only *reads* the apps' own chat files (`~\.claude\projects`, `~\.codex\sessions`). When you set up a team it writes `TEAM.md` into the project and points `AGENTS.md`/`CLAUDE.md` at it.
 - **Tests:** from the Crewroom folder, `python -m unittest tests.test_team`
 
 ## Credits
-Designed by **Ghaith Saad Jawad**. Built with a Crewroom crew: Claude (code, film) and ChatGPT via Codex (art). The launch video's music is "Pixel Dreams" by DJ Lofi.
+Designed by **Ghaith Saad Jawad**. Built with a Crewroom crew: Claude (code, film), Codex with ChatGPT's image model (the clay crew) and Cursor (review). The launch film's music is "Pixel Dreams" by DJ Lofi; its voice is Kokoro (af_heart).
 
 MIT licence.
 

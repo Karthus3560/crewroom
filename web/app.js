@@ -615,7 +615,8 @@ $('#composer').addEventListener('submit', async (e) => {
     } else if (state.to === 'team') {
       if (!body) return;
       const sent = await api('say', { body, project: state.project, channel: state.view.type === 'channel' ? state.view.channel : 'general' });
-      if (sent.discussion) toast(sent.joined ? 'Added to the round-table: the next speaker sees it' : 'Round-table started: the team talks it through, then decides');
+      if (sent.stopped !== undefined) toast(sent.stopped ? `Stopped ${sent.stopped} job${sent.stopped > 1 ? 's' : ''} in this project` : 'Nothing was running');
+      else if (sent.discussion) toast(sent.joined ? 'Added to the round-table: the next speaker sees it' : 'Round-table started: the team talks it through, then decides');
       else if (sent.routedTo) toast(`${member(sent.routedTo).name} is reading your message`);
       else if (!(sent.mentions || []).length)  // say so, or it looks like the team is ignoring you
         toast('Posted for everyone to see. Nobody answers the team room in this project: @mention someone, write @team, or change "Who answers the team room" in Edit team.');
@@ -707,7 +708,7 @@ function choose(title, textBody, options) {
 async function startFresh(p) {
   const pick = await choose(`Start fresh in “${p.name}”?`, [
     'Start fresh: older messages and finished requests are hidden (you can show them again), and every team member starts a new chat next time — no old context, fewer tokens.',
-    'Delete history: permanently removes this project’s Crewroom messages and requests. Your project files and the chats inside the Claude and Codex apps are not touched.',
+    'Delete history: permanently removes this project’s Crewroom messages and requests. Your project files and the chats inside your agents’ own apps are not touched.',
   ], [
     { label: 'Cancel', value: null },
     { label: 'Delete history…', value: 'delete', cls: 'danger' },
@@ -1144,7 +1145,7 @@ $('#about').onclick = async () => {
 
 async function uninstall() {
   const sure = await choose('Uninstall Crewroom?', [
-    'This removes the team skill from Claude and Codex and stops Crewroom.',
+    'This removes the team skill from your agents and stops Crewroom.',
     `Your chats are kept in ${about.data}. Delete that folder yourself if you don't want them.`,
   ], [{ label: 'Cancel', value: null }, { label: 'Uninstall', value: 'yes', cls: 'danger' }]);
   if (sure !== 'yes') return;
@@ -1169,8 +1170,8 @@ async function showWelcome() {
   const agents = !!(c.claude || c.codex || Object.values(c.agents || {}).some((a) => a.found));
   $('#welcome-body').replaceChildren(
     el('section', {}, el('h3', {}, 'How it works'), el('ol', { class: 'how' },
-      el('li', {}, el('b', {}, 'You lead. '), 'Make a project (a folder) and pick your crew: Claude and Codex members, each with a role.'),
-      el('li', {}, el('b', {}, 'They work in their own apps. '), 'Claude Code and Codex do the real work, using your own plans, and hand tasks to each other with the team skill.'),
+      el('li', {}, el('b', {}, 'You lead. '), 'Make a project (a folder) and pick your crew: any mix of Claude, Codex, Cursor and Antigravity members, each with a role.'),
+      el('li', {}, el('b', {}, 'They work in their own apps. '), 'Your agents do the real work, using your own plans, and hand tasks to each other. Write @team in #discussion and they talk it through.'),
       el('li', {}, el('b', {}, 'Everything lands here. '), 'Requests, replies, files and images show up in this window as they happen.'))),
     el('section', {}, el('h3', {}, 'This computer'), el('div', { class: 'checks' },
       row(!!c.claude, c.claude ? 'Claude Code is installed' : 'Claude Code was not found',
@@ -1178,7 +1179,7 @@ async function showWelcome() {
       row(!!c.codex, c.codex ? 'Codex is installed' : 'Codex was not found', 'Install the Codex app (chatgpt.com/codex) or the Codex CLI and sign in.'),
       row(c.skills.claude && c.skills.codex, c.skills.claude && c.skills.codex ? 'The team skill is set up for Claude and Codex'
         : 'The team skill is not set up', 'Run the Crewroom installer again: it sets this up for both apps.'),
-      ...Object.values(c.agents || {}).filter((a) => a.optional).map((a) => row(a.found, a.found ? `${a.name} is installed (optional)` : `${a.name} is not installed (optional)`,
+      ...Object.values(c.agents || {}).filter((a) => a.optional).map((a) => row(a.found, a.found ? `${a.name} is installed` : `${a.name} is not installed (optional)`,
         `${a.install} Then: ${a.login}`)),
       agents ? null : el('p', {}, 'Crewroom needs at least one of Claude Code, Codex, Cursor or Antigravity. Install one, then press Check again.')),
       el('p', { class: 'muted', style: 'font-size:12.5px;margin:0' }, 'Step-by-step install and sign-in for every agent: ',
