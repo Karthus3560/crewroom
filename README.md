@@ -4,7 +4,7 @@
 
 **Your AI team, in one room.** Crewroom turns Claude Code, OpenAI Codex, Cursor and Google Antigravity into one team on your computer (Windows, macOS or Linux). They hand work to each other, talk decisions through, and you lead.
 
-▶ **[Watch the 1:26 film and see the site](https://karthus3560.github.io/crewroom/)**
+▶ **[Watch the 1:27 film and see the site](https://karthus3560.github.io/crewroom/)**
 
 ## What it does
 - **Hire a crew per project:** any mix of Claude, Codex, Cursor and Antigravity members, each with its own roles, model and colour, and its own ongoing chat.
